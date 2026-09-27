@@ -31,7 +31,28 @@ find tools/ -type f -name "*.sh" -exec chmod +x {} \;
 # 4. 修复 SUSFS 补丁问题
 sed -i 's/ksu_handle_stat(&dfd, &fname, &flag)/ksu_handle_stat(\&dfd, \&fname, \&flags)/' fs/stat.c
 sed -i '1i #include <linux/susfs_def.h>' fs/proc/task_mmu.c
-sed -i '/SUSFS_IS_INODE_SUS_MAP/,/return 0;/ s/return 0;/return;/' fs/proc/task_mmu.c
+# 只在 smap_gather_stats 函数体内把 return 0; 改成 return;（该函数是 void）
+python3 -c "
+import re
+with open('fs/proc/task_mmu.c') as f:
+    lines = f.readlines()
+in_func = False
+brace_depth = 0
+out = []
+for line in lines:
+    if not in_func and re.search(r'\bsmap_gather_stats\s*\(', line):
+        in_func = True
+        brace_depth = line.count('{') - line.count('}')
+    elif in_func:
+        brace_depth += line.count('{') - line.count('}')
+        if 'return 0;' in line:
+            line = line.replace('return 0;', 'return;')
+        if brace_depth <= 0:
+            in_func = False
+    out.append(line)
+with open('fs/proc/task_mmu.c', 'w') as f:
+    f.writelines(out)
+"
 
 # 5. 禁用 WERROR
 find . -name "Makefile" -exec sed -i 's/-Werror/-Wno-error/g' {} +
