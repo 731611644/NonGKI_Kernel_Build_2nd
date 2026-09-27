@@ -5,46 +5,39 @@ on:
   workflow_dispatch:
 
 env:
-  # 设备信息
+  # Device env
   DEVICE_NAME : "honor_50_se"
   DEVICE_CODENAME : "jlh_an00"
 
-  # Clang 编译器参数（4.14 内核需要用 Clang + GCC 组合）
   CUSTOM_CMDS : "CLANG_TRIPLE=aarch64-linux-gnu-"
-  EXTRA_CMDS : "LD=ld.lld LLVM=1 LLVM_IAS=1"
+  EXTRA_CMDS : "LD=ld.lld"
 
-  # 内核源码地址（你的 GitHub 仓库）
   KERNEL_SOURCE : "https://github.com/731611644/honor50se_kernel.git"
   KERNEL_BRANCH : "main"
 
-  # 编译器：LLVM 14
   CLANG_SOURCE : "https://github.com/llvm/llvm-project/releases/download/llvmorg-14.0.6/clang+llvm-14.0.6-x86_64-linux-gnu-rhel-8.4.tar.xz"
   CLANG_BRANCH : ""
 
-  # GCC 工具链（AOSP GCC 4.9，只提供 binutils，不含 gcc 本体）
   GCC_GNU : false
   GCC_64_SOURCE : "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9.git"
   GCC_64_BRANCH : "android12L-release"
   GCC_32_SOURCE : "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9.git"
   GCC_32_BRANCH : "android12L-release"
 
-  # 内核配置文件名
   DEFCONFIG_SOURCE: ""
   DEFCONFIG_NAME : "merge_full_k6877v1_64_defconfig"
   DEFCONFIG_ORIGIN_IMAGE: ""
   DEFCONFIG_FROM_BOOT: false
 
-  # KernelSU 配置（自动获取，用 ReSukiSU 分支，支持 4.14）
   KERNELSU_SOURCE : ""
   KERNELSU_BRANCH : ""
+
   KERNELSU_AUTO_GET : "true"
-  KERNELSU_AUTO_FORK : "resukisu"
+  KERNELSU_AUTO_FORK : "resukisu" # xxksu, rsuntk , next, resukisu and sukisu
 
-  # SUSFS 配置（开启 root 隐藏，跳过打不上的补丁）
   SUSFS_ENABLE : true
-  SUSFS_FIXED : false
+  SUSFS_FIXED : true
 
-  # AnyKernel3（打包工具）
   AK3_SOURCE : "https://github.com/osm0sis/AnyKernel3.git"
   AK3_BRANCH : "master"
 
@@ -55,12 +48,14 @@ env:
 
   ROM_TEXT : "magicui42"
 
+  # Other env
   PYTHON_VERSION: "3"
 
   PACK_METHOD: "AnyKernel3"
   PACK_KMODULES: "false"
 
   KERNELSU_METHOD: "shell"
+  KERNELSU_SUS_PATCH: "false"
 
   PATCHES_SOURCE: "JackA1ltman/NonGKI_Kernel_Patches"
   PATCHES_BRANCH: "mi_kernel"
@@ -103,7 +98,6 @@ jobs:
       CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
       CCACHE_NOHASHDIR: "true"
       CCACHE_HARDLINK: "true"
-
     steps:
       - name: ⏰ Checkout repository
         uses: actions/checkout@v6
@@ -124,13 +118,8 @@ jobs:
         run: |
           cd $GITHUB_WORKSPACE/device_kernel
 
-          # ============================================================
-          # 【修复 1】荣耀内核驱动目录结构问题
-          # 荣耀把联发科驱动从 vendor/mediatek/kernel_modules/connectivity/
-          # 移到了 kernel/drivers/misc/mediatek/connectivity/ 里，
-          # 但 Makefile 还按老路径找。编译前搬回去。
-          # ============================================================
-          mkdir -p ../vendor/mediatek/kernel_modules/connectivity/wlan/adaptor
+          # ===== 搬移 MediaTek connectivity 驱动到 vendor 期望路径 =====
+          # 关键：不预先创建 wlan/adaptor 目录，让 mv 把 wmt_chrdev_wifi 直接重命名为 adaptor
           mkdir -p ../vendor/mediatek/kernel_modules/connectivity/wlan/core
           mkdir -p ../vendor/mediatek/kernel_modules/connectivity/bt/mt66xx
 
@@ -141,16 +130,11 @@ jobs:
           mv drivers/misc/mediatek/connectivity/fmradio         ../vendor/mediatek/kernel_modules/connectivity/fmradio
           mv drivers/misc/mediatek/connectivity/gps_drv         ../vendor/mediatek/kernel_modules/connectivity/gps
 
-          # ============================================================
-          # 【修复 2】clang-android.sh 执行权限（Windows 解压丢失）
-          # ============================================================
+          # ===== 修复 clang-android.sh 权限 =====
           chmod +x scripts/clang-android.sh
 
-          # ============================================================
-          # 【修复 3】关闭华为安全检测选项（与 KernelSU/SUSFS 冲突）
-          # ============================================================
+          # ===== 关闭华为安全选项 =====
           DEFCONFIG=arch/arm64/configs/merge_full_k6877v1_64_defconfig
-
           sed -i 's/^CONFIG_HISI_PMALLOC=y.*/# CONFIG_HISI_PMALLOC is not set/' $DEFCONFIG
           sed -i 's/^CONFIG_HIVIEW_SELINUX=y.*/# CONFIG_HIVIEW_SELINUX is not set/' $DEFCONFIG
           sed -i 's/^CONFIG_HISI_SELINUX_EBITMAP_RO=y.*/# CONFIG_HISI_SELINUX_EBITMAP_RO is not set/' $DEFCONFIG
