@@ -5,39 +5,46 @@ on:
   workflow_dispatch:
 
 env:
-  # Device env
+  # 设备信息
   DEVICE_NAME : "honor_50_se"
   DEVICE_CODENAME : "jlh_an00"
 
+  # Clang 编译器参数（4.14 内核需要用 Clang + GCC 组合）
   CUSTOM_CMDS : "CLANG_TRIPLE=aarch64-linux-gnu-"
   EXTRA_CMDS : "LD=ld.lld LLVM=1 LLVM_IAS=1"
 
+  # 内核源码地址（你的 GitHub 仓库）
   KERNEL_SOURCE : "https://github.com/731611644/honor50se_kernel.git"
   KERNEL_BRANCH : "main"
 
+  # 编译器：LLVM 14（4.14 内核推荐用 Clang 12-14）
   CLANG_SOURCE : "https://github.com/llvm/llvm-project/releases/download/llvmorg-14.0.6/clang+llvm-14.0.6-x86_64-linux-gnu-rhel-8.4.tar.xz"
   CLANG_BRANCH : ""
 
+  # GCC 工具链（AOSP GCC 4.9，只提供 binutils，不含 gcc 本体）
   GCC_GNU : false
   GCC_64_SOURCE : "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9.git"
   GCC_64_BRANCH : "android12L-release"
   GCC_32_SOURCE : "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9.git"
   GCC_32_BRANCH : "android12L-release"
 
+  # 内核配置文件名
   DEFCONFIG_SOURCE: ""
   DEFCONFIG_NAME : "merge_full_k6877v1_64_defconfig"
   DEFCONFIG_ORIGIN_IMAGE: ""
   DEFCONFIG_FROM_BOOT: false
 
+  # KernelSU 配置（自动获取，用 ReSukiSU 分支，支持 4.14）
   KERNELSU_SOURCE : ""
   KERNELSU_BRANCH : ""
-
   KERNELSU_AUTO_GET : "true"
   KERNELSU_AUTO_FORK : "resukisu"
 
+  # SUSFS 配置（开启 root 隐藏，跳过打不上的补丁）
   SUSFS_ENABLE : true
   SUSFS_FIXED : false
 
+  # AnyKernel3（打包工具）
   AK3_SOURCE : "https://github.com/osm0sis/AnyKernel3.git"
   AK3_BRANCH : "master"
 
@@ -116,6 +123,68 @@ jobs:
       - name: 🪛 Extra Kernel Options
         run: |
           cd $GITHUB_WORKSPACE/device_kernel
+
+          # ============================================================
+          # 【修复 1】荣耀内核驱动目录结构问题
+          # ------------------------------------------------------------
+          # 问题原因：
+          #   荣耀开源内核时，把联发科的连接性驱动（WiFi/蓝牙/GPS/FM）
+          #   从 vendor/mediatek/kernel_modules/connectivity/ 目录
+          #   移到了 kernel/drivers/misc/mediatek/connectivity/ 目录里，
+          #   但是没有修改 Makefile。
+          #   Makefile 还是按老路径去 vendor/mediatek/kernel_modules/ 找驱动，
+          #   导致报 "conninfra is not existed" 错误。
+          #
+          # 解决方法：
+          #   在编译前，把驱动目录搬回 Makefile 期望的位置。
+          #   Makefile 会自动创建符号链接指回来，不影响编译。
+          # ============================================================
+
+          # 1. 创建 Makefile 期望的 vendor 目录结构
+          #    （GitHub 仓库里没有这个目录，需要在这里创建）
+          mkdir -p ../vendor/mediatek/kernel_modules/connectivity/wlan/adaptor
+          mkdir -p ../vendor/mediatek/kernel_modules/connectivity/wlan/core
+          mkdir -p ../vendor/mediatek/kernel_modules/connectivity/bt/mt66xx
+
+          # 2. 把 6 个驱动目录从 kernel 里搬到 vendor 对应位置
+          #    对应关系（Makefile 要找的名字 ← 实际目录名）：
+          #    conninfra       ← wmt_drv         （WMT连接基础设施，里面有 conninfra 子目录）
+          #    wlan/adaptor    ← wmt_chrdev_wifi （WiFi 字符设备驱动）
+          #    wlan/core/gen4m ← wlan_drv_gen4m  （gen4m WiFi 核心驱动）
+          #    bt/mt66xx/connac2 ← bt             （蓝牙驱动）
+          #    fmradio         ← fmradio          （FM 收音机，名字一样）
+          #    gps             ← gps_drv          （GPS 驱动）
+          mv drivers/misc/mediatek/connectivity/wmt_drv         ../vendor/mediatek/kernel_modules/connectivity/conninfra
+          mv drivers/misc/mediatek/connectivity/wmt_chrdev_wifi ../vendor/mediatek/kernel_modules/connectivity/wlan/adaptor
+          mv drivers/misc/mediatek/connectivity/wlan_drv_gen4m  ../vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m
+          mv drivers/misc/mediatek/connectivity/bt              ../vendor/mediatek/kernel_modules/connectivity/bt/mt66xx/connac2
+          mv drivers/misc/mediatek/connectivity/fmradio         ../vendor/mediatek/kernel_modules/connectivity/fmradio
+          mv drivers/misc/mediatek/connectivity/gps_drv         ../vendor/mediatek/kernel_modules/connectivity/gps
+
+          # ============================================================
+          # 【修复 2】clang-android.sh 执行权限问题
+          # ------------------------------------------------------------
+          # 问题原因：
+          #   源码在 Windows 上解压时，Linux 的执行权限位丢失了。
+          #   git 记录的也是无执行权限，GitHub Actions clone 下来也没有。
+          #   Makefile 直接执行 clang-android.sh 时报 "Permission denied"。
+          #
+          # 解决方法：
+          #   编译前 chmod +x 恢复执行权限。
+          # ============================================================
+          chmod +x scripts/clang-android.sh
+
+          # ============================================================
+          # 【修复 3】关闭华为安全检测选项
+          # ------------------------------------------------------------
+          # 问题原因：
+          #   华为内核里有很多安全检测功能（root检测、完整性校验等），
+          #   这些功能跟 KernelSU/SUSFS 冲突，必须关掉。
+          #
+          # 解决方法：
+          #   用 sed 把 defconfig 里的 =y 改成 is not set。
+          #   不存在的选项 sed 会自动跳过，不会出错。
+          # ============================================================
           DEFCONFIG=arch/arm64/configs/merge_full_k6877v1_64_defconfig
 
           sed -i 's/^CONFIG_HISI_PMALLOC=y.*/# CONFIG_HISI_PMALLOC is not set/' $DEFCONFIG
@@ -143,7 +212,7 @@ jobs:
           sed -i 's/^CONFIG_TEE_ANTIROOT_CLIENT=y.*/# CONFIG_TEE_ANTIROOT_CLIENT is not set/' $DEFCONFIG
           sed -i 's/^CONFIG_HWAA=y.*/# CONFIG_HWAA is not set/' $DEFCONFIG
 
-          echo "[+] Disabled Huawei security options."
+          echo "[+] All setup done."
 
       - name: 🧰 Patch Kernel of Re:Kernel
         uses: ./.github/workflows/patch-rekernel
