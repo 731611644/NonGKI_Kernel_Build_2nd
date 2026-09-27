@@ -45,8 +45,8 @@ sed -i 's|^        obj-y += fmradio/|        #obj-y += fmradio/|' "$CONN_MK"
 sed -i 's|^         obj-y += gps_drv/|        #obj-y += gps_drv/|' "$CONN_MK"
 
 # 6. 修复 wmt_exp.h / stp_exp.h 缺失
-CONNINFRA_INC=vendor/mediatek/kernel_modules/connectivity/conninfra/include
-CONNINFRA_DIR=vendor/mediatek/kernel_modules/connectivity/conninfra
+CONNINFRA_DIR="$VENDOR/conninfra"
+CONNINFRA_INC="$CONNINFRA_DIR/include"
 COMMON_INC=drivers/misc/mediatek/connectivity/common
 mkdir -p "$CONNINFRA_INC" "$COMMON_INC"
 
@@ -58,9 +58,9 @@ typedef int MTK_WCN_BOOL;
 #define MTK_WCN_BOOL_TRUE  1
 #define MTK_WCN_BOOL_FALSE 0
 enum WMTDRV_TYPE {
-        WMTDRV_TYPE_STP = 0, WMTDRV_TYPE_BT, WMTDRV_TYPE_FM, WMTDRV_TYPE_GPS,
-        WMTDRV_TYPE_WIFI, WMTDRV_TYPE_WMT, WMTDRV_TYPE_SDIO1, WMTDRV_TYPE_SDIO2,
-        WMTDRV_TYPE_T, WMTDRV_TYPE_LPBK, WMTDRV_TYPE_GPSL5, WMTDRV_TYPE_MAX
+	WMTDRV_TYPE_STP = 0, WMTDRV_TYPE_BT, WMTDRV_TYPE_FM, WMTDRV_TYPE_GPS,
+	WMTDRV_TYPE_WIFI, WMTDRV_TYPE_WMT, WMTDRV_TYPE_SDIO1, WMTDRV_TYPE_SDIO2,
+	WMTDRV_TYPE_T, WMTDRV_TYPE_LPBK, WMTDRV_TYPE_GPSL5, WMTDRV_TYPE_MAX
 };
 enum WMTCHIN { WMTCHIN_CHIPID = 0, WMTCHIN_HWVER, WMTCHIN_ADIE, WMTCHIN_FWVER };
 enum WMTDSNS { WMTDSNS_FM_GPS_DISABLE = 0, WMTDSNS_FM_GPS_ENABLE };
@@ -181,7 +181,7 @@ EOF
 
 sed -i '/conninfra_core\.o$/a $(MODULE_NAME)-objs += wmt_stp_stub.o' "$CONNINFRA_DIR/Makefile"
 
-WMT_MK=vendor/mediatek/kernel_modules/connectivity/wlan/adaptor/Makefile
+WMT_MK="$VENDOR/wlan/adaptor/Makefile"
 if [ -f "$WMT_MK" ]; then
   sed -i '/conninfra\/include$/a\ccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/conninfra/drv_init/include\nccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/conninfra/base/include\nccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/conninfra/core/include\nccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/conninfra/conf/include\nccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/conninfra/platform/include' "$WMT_MK"
 fi
