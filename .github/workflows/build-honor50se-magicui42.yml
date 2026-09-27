@@ -81,7 +81,7 @@ env:
   GENERATE_CHIP: "mediatek"
 
   BUILD_DEBUGGER: "true"
-  SKIP_PATCH: "false"
+  SKIP_PATCH: "true"
 
   BUILD_OTHER_CONFIG: "false"
   MERGE_CONFIG_FILES: ""
