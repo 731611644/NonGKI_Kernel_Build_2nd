@@ -5,7 +5,6 @@ on:
   workflow_dispatch:
 
 env:
-  # Device env
   DEVICE_NAME : "honor_50_se"
   DEVICE_CODENAME : "jlh_an00"
 
@@ -115,29 +114,44 @@ jobs:
 
       - name: 🪛 Extra Kernel Options
         run: |
+          set -euxo pipefail
           cd $GITHUB_WORKSPACE/device_kernel
 
-          # ===== 搬移 MediaTek connectivity 驱动到 vendor 期望路径 =====
-          mkdir -p ../vendor/mediatek/kernel_modules/connectivity/wlan/core
-          mkdir -p ../vendor/mediatek/kernel_modules/connectivity/bt/mt66xx
-
-          mv drivers/misc/mediatek/connectivity/wmt_drv         ../vendor/mediatek/kernel_modules/connectivity/conninfra
-          mv drivers/misc/mediatek/connectivity/wmt_chrdev_wifi ../vendor/mediatek/kernel_modules/connectivity/wlan/adaptor
-          mv drivers/misc/mediatek/connectivity/wlan_drv_gen4m  ../vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m
-          mv drivers/misc/mediatek/connectivity/bt              ../vendor/mediatek/kernel_modules/connectivity/bt/mt66xx/connac2
-          mv drivers/misc/mediatek/connectivity/fmradio         ../vendor/mediatek/kernel_modules/connectivity/fmradio
-          mv drivers/misc/mediatek/connectivity/gps_drv         ../vendor/mediatek/kernel_modules/connectivity/gps
-
-          # ===== 手动创建 bt/fmradio 符号链接（Makefile 自动创建对这两个不可靠）=====
           VENDOR="$GITHUB_WORKSPACE/vendor/mediatek/kernel_modules/connectivity"
-          ln -sf "$VENDOR/bt/mt66xx/connac2" drivers/misc/mediatek/connectivity/bt
-          ln -sf "$VENDOR/fmradio"           drivers/misc/mediatek/connectivity/fmradio
+          mkdir -p "$VENDOR/wlan/core"
+          mkdir -p "$VENDOR/bt/mt66xx"
 
-          # ===== 修复脚本执行权限 =====
+          declare -A MAP=(
+            [wmt_drv]="conninfra"
+            [wmt_chrdev_wifi]="wlan/adaptor"
+            [wlan_drv_gen4m]="wlan/core/gen4m"
+            [bt]="bt/mt66xx/connac2"
+            [fmradio]="fmradio"
+            [gps_drv]="gps"
+          )
+
+          for SRC_NAME in "${!MAP[@]}"; do
+            DST_REL="${MAP[$SRC_NAME]}"
+            SRC_PATH="drivers/misc/mediatek/connectivity/$SRC_NAME"
+            DST_PATH="$VENDOR/$DST_REL"
+
+            mkdir -p "$(dirname "$DST_PATH")"
+
+            if [ -e "$SRC_PATH" ]; then
+              if [ -d "$DST_PATH" ]; then
+                mv "$SRC_PATH" "$DST_PATH/"
+              else
+                mv "$SRC_PATH" "$DST_PATH"
+              fi
+            fi
+
+            rm -rf "$SRC_PATH"
+            ln -sfn "$DST_PATH" "$SRC_PATH"
+          done
+
           chmod +x scripts/clang-android.sh
           chmod +x arch/arm64/kernel/vdso/gen_vdso_offsets.sh
 
-          # ===== 关闭华为安全选项 =====
           DEFCONFIG=arch/arm64/configs/merge_full_k6877v1_64_defconfig
           sed -i 's/^CONFIG_HISI_PMALLOC=y.*/# CONFIG_HISI_PMALLOC is not set/' $DEFCONFIG
           sed -i 's/^CONFIG_HIVIEW_SELINUX=y.*/# CONFIG_HIVIEW_SELINUX is not set/' $DEFCONFIG
@@ -163,6 +177,16 @@ jobs:
           sed -i 's/^CONFIG_HISI_SUBPMU=y.*/# CONFIG_HISI_SUBPMU is not set/' $DEFCONFIG
           sed -i 's/^CONFIG_TEE_ANTIROOT_CLIENT=y.*/# CONFIG_TEE_ANTIROOT_CLIENT is not set/' $DEFCONFIG
           sed -i 's/^CONFIG_HWAA=y.*/# CONFIG_HWAA is not set/' $DEFCONFIG
+
+          echo "===== 验证符号链接 ====="
+          for d in wmt_drv wmt_chrdev_wifi wlan_drv_gen4m bt fmradio gps_drv; do
+            if [ -f "drivers/misc/mediatek/connectivity/$d/Makefile" ]; then
+              echo "$d: OK"
+            else
+              echo "$d: FAIL !!!"
+              ls -la "drivers/misc/mediatek/connectivity/$d" 2>&1 || true
+            fi
+          done
 
           echo "[+] All setup done."
 
