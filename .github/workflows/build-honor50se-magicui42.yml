@@ -110,9 +110,11 @@ jobs:
           chmod +x tools/build/cpio
           find tools/ -type f -name "*.sh" -exec chmod +x {} \;
 
-          # 4. 修复 SUSFS 补丁在 4.14 内核的笔误（flag → flags）
-          # 只匹配 ksu_handle_stat 调用，避免误伤其他代码
+          # 4. 修复 SUSFS 补丁问题
+          # 4a. stat.c 的笔误（flag → flags）
           sed -i 's/ksu_handle_stat(&dfd, &fname, &flag)/ksu_handle_stat(\&dfd, \&fname, \&flags)/' fs/stat.c
+          # 4b. task_mmu.c 缺少 susfs_def.h 头文件（被拒补丁导致）
+          sed -i '1i #include <linux/susfs_def.h>' fs/proc/task_mmu.c
 
           # 5. 禁用华为安全检测（避免 root 被检测）
           DEFCONFIG=arch/arm64/configs/merge_full_k6877v1_64_defconfig
@@ -140,6 +142,9 @@ jobs:
           sed -i 's/^CONFIG_HISI_SUBPMU=y.*/# CONFIG_HISI_SUBPMU is not set/' $DEFCONFIG
           sed -i 's/^CONFIG_TEE_ANTIROOT_CLIENT=y.*/# CONFIG_TEE_ANTIROOT_CLIENT is not set/' $DEFCONFIG
           sed -i 's/^CONFIG_HWAA=y.*/# CONFIG_HWAA is not set/' $DEFCONFIG
+
+          # 6. 禁用 WERROR，避免 Clang 严格性导致老代码编译失败
+          sed -i 's/^CONFIG_WERROR=y.*/# CONFIG_WERROR is not set/' $DEFCONFIG
 
           echo "[+] All setup done."
       - name: 🧰 Patch Kernel of Re:Kernel
