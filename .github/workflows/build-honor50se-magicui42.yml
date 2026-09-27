@@ -118,8 +118,6 @@ jobs:
           cd $GITHUB_WORKSPACE/device_kernel
 
           VENDOR="$GITHUB_WORKSPACE/vendor/mediatek/kernel_modules/connectivity"
-          mkdir -p "$VENDOR/wlan/core"
-          mkdir -p "$VENDOR/bt/mt66xx"
 
           declare -A MAP=(
             [wmt_drv]="conninfra"
@@ -131,22 +129,31 @@ jobs:
           )
 
           for SRC_NAME in "${!MAP[@]}"; do
-            DST_REL="${MAP[$SRC_NAME]}"
-            SRC_PATH="drivers/misc/mediatek/connectivity/$SRC_NAME"
-            DST_PATH="$VENDOR/$DST_REL"
+            SRC_PATH="$GITHUB_WORKSPACE/device_kernel/drivers/misc/mediatek/connectivity/$SRC_NAME"
+            DST_PATH="$VENDOR/${MAP[$SRC_NAME]}"
 
             mkdir -p "$(dirname "$DST_PATH")"
 
-            if [ -e "$SRC_PATH" ]; then
-              if [ -d "$DST_PATH" ]; then
-                mv "$SRC_PATH" "$DST_PATH/"
-              else
-                mv "$SRC_PATH" "$DST_PATH"
-              fi
+            # 关键：先删除目标，防止 mv 把源放进目标内部导致嵌套
+            if [ -e "$SRC_PATH" ] || [ -L "$SRC_PATH" ]; then
+              rm -rf "$DST_PATH"
+              mv "$SRC_PATH" "$DST_PATH"
             fi
 
             rm -rf "$SRC_PATH"
-            ln -sfn "$DST_PATH" "$SRC_PATH"
+            ln -s "$DST_PATH" "$SRC_PATH"
+
+            # 验证 Makefile 存在，失败就打印目录结构
+            if [ ! -f "$SRC_PATH/Makefile" ]; then
+              echo "::error::$SRC_NAME Makefile not found at $DST_PATH"
+              echo "=== find $DST_PATH (maxdepth 3) ==="
+              find "$DST_PATH" -maxdepth 3 -type f -name Makefile -print 2>&1 || true
+              echo "=== ls -la $DST_PATH ==="
+              ls -la "$DST_PATH" 2>&1 || true
+              exit 1
+            fi
+
+            echo "$SRC_NAME: OK -> $(readlink "$SRC_PATH")"
           done
 
           chmod +x scripts/clang-android.sh
@@ -177,16 +184,6 @@ jobs:
           sed -i 's/^CONFIG_HISI_SUBPMU=y.*/# CONFIG_HISI_SUBPMU is not set/' $DEFCONFIG
           sed -i 's/^CONFIG_TEE_ANTIROOT_CLIENT=y.*/# CONFIG_TEE_ANTIROOT_CLIENT is not set/' $DEFCONFIG
           sed -i 's/^CONFIG_HWAA=y.*/# CONFIG_HWAA is not set/' $DEFCONFIG
-
-          echo "===== 验证符号链接 ====="
-          for d in wmt_drv wmt_chrdev_wifi wlan_drv_gen4m bt fmradio gps_drv; do
-            if [ -f "drivers/misc/mediatek/connectivity/$d/Makefile" ]; then
-              echo "$d: OK"
-            else
-              echo "$d: FAIL !!!"
-              ls -la "drivers/misc/mediatek/connectivity/$d" 2>&1 || true
-            fi
-          done
 
           echo "[+] All setup done."
 
