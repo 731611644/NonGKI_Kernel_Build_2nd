@@ -9,25 +9,19 @@ env:
   DEVICE_NAME : "honor_50_se"
   DEVICE_CODENAME : "jlh_an00"
 
-  # ============================================================
-  # 编译器配置（照抄原作者，针对 4.14 内核）
-  # ------------------------------------------------------------
-  # 原作者 wiki 说明：
-  #   内核 ≤ 4.14：用 AOSP Clang 12 + Google GCC 4.9
-  #   EXTRA_CMDS 只需 LD=ld.lld（不要加 LLVM=1 LLVM_IAS=1，那是 ≥4.19 用的）
-  # ============================================================
+  # Clang 编译器参数（4.14 内核需要用 Clang + GCC 组合）
   CUSTOM_CMDS : "CLANG_TRIPLE=aarch64-linux-gnu-"
-  EXTRA_CMDS : "LD=ld.lld"
+  EXTRA_CMDS : "LD=ld.lld LLVM=1 LLVM_IAS=1"
 
-  # 内核源码地址
+  # 内核源码地址（你的 GitHub 仓库）
   KERNEL_SOURCE : "https://github.com/731611644/honor50se_kernel.git"
   KERNEL_BRANCH : "main"
 
-  # Clang 12（LineageOS r416183b，对应 AOSP Clang 12）
-  CLANG_SOURCE : "https://github.com/LineageOS/android_prebuilts_clang_kernel_linux-x86_clang-r416183b.git"
-  CLANG_BRANCH : "lineage-20.0"
+  # 编译器：LLVM 14
+  CLANG_SOURCE : "https://github.com/llvm/llvm-project/releases/download/llvmorg-14.0.6/clang+llvm-14.0.6-x86_64-linux-gnu-rhel-8.4.tar.xz"
+  CLANG_BRANCH : ""
 
-  # GCC 4.9（AOSP，只提供 binutils）
+  # GCC 工具链（AOSP GCC 4.9，只提供 binutils，不含 gcc 本体）
   GCC_GNU : false
   GCC_64_SOURCE : "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9.git"
   GCC_64_BRANCH : "android12L-release"
@@ -40,13 +34,13 @@ env:
   DEFCONFIG_ORIGIN_IMAGE: ""
   DEFCONFIG_FROM_BOOT: false
 
-  # KernelSU（自动获取，用 ReSukiSU 分支）
+  # KernelSU 配置（自动获取，用 ReSukiSU 分支，支持 4.14）
   KERNELSU_SOURCE : ""
   KERNELSU_BRANCH : ""
   KERNELSU_AUTO_GET : "true"
   KERNELSU_AUTO_FORK : "resukisu"
 
-  # SUSFS（开启 root 隐藏）
+  # SUSFS 配置（开启 root 隐藏，跳过打不上的补丁）
   SUSFS_ENABLE : true
   SUSFS_FIXED : false
 
@@ -132,18 +126,18 @@ jobs:
 
           # ============================================================
           # 【修复 1】荣耀内核驱动目录结构问题
-          # ------------------------------------------------------------
           # 荣耀把联发科驱动从 vendor/mediatek/kernel_modules/connectivity/
           # 移到了 kernel/drivers/misc/mediatek/connectivity/ 里，
           # 但 Makefile 还按老路径找。编译前搬回去。
           # ============================================================
           mkdir -p ../vendor/mediatek/kernel_modules/connectivity/wlan/adaptor
           mkdir -p ../vendor/mediatek/kernel_modules/connectivity/wlan/core
+          mkdir -p ../vendor/mediatek/kernel_modules/connectivity/bt/mt66xx
 
           mv drivers/misc/mediatek/connectivity/wmt_drv         ../vendor/mediatek/kernel_modules/connectivity/conninfra
           mv drivers/misc/mediatek/connectivity/wmt_chrdev_wifi ../vendor/mediatek/kernel_modules/connectivity/wlan/adaptor
           mv drivers/misc/mediatek/connectivity/wlan_drv_gen4m  ../vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m
-          mv drivers/misc/mediatek/connectivity/bt              ../vendor/mediatek/kernel_modules/connectivity/bt
+          mv drivers/misc/mediatek/connectivity/bt              ../vendor/mediatek/kernel_modules/connectivity/bt/mt66xx/connac2
           mv drivers/misc/mediatek/connectivity/fmradio         ../vendor/mediatek/kernel_modules/connectivity/fmradio
           mv drivers/misc/mediatek/connectivity/gps_drv         ../vendor/mediatek/kernel_modules/connectivity/gps
 
