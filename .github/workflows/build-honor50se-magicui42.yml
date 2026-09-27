@@ -224,4 +224,30 @@ jobs:
           sed -i 's/^CONFIG_HUAWEI_EIMA_ACCESS_CONTROL=y.*/# CONFIG_HUAWEI_EIMA_ACCESS_CONTROL is not set/' $DEFCONFIG
           sed -i 's/^CONFIG_HW_DOUBLE_FREE_DYNAMIC_CHECK=y.*/# CONFIG_HW_DOUBLE_FREE_DYNAMIC_CHECK is not set/' $DEFCONFIG
           sed -i 's/^CONFIG_HKIP_ATKINFO=y.*/# CONFIG_HKIP_ATKINFO is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_HW_KERNEL_STP=y.
+          sed -i 's/^CONFIG_HW_KERNEL_STP=y.*/# CONFIG_HW_KERNEL_STP is not set/' $DEFCONFIG
+          sed -i 's/^CONFIG_HISI_HHEE=y.*/# CONFIG_HISI_HHEE is not set/' $DEFCONFIG
+          sed -i 's/^CONFIG_HISI_HHEE_TOKEN=y.*/# CONFIG_HISI_HHEE_TOKEN is not set/' $DEFCONFIG
+          sed -i 's/^CONFIG_HISI_DIEID=y.*/# CONFIG_HISI_DIEID is not set/' $DEFCONFIG
+          sed -i 's/^CONFIG_HISI_SUBPMU=y.*/# CONFIG_HISI_SUBPMU is not set/' $DEFCONFIG
+          sed -i 's/^CONFIG_TEE_ANTIROOT_CLIENT=y.*/# CONFIG_TEE_ANTIROOT_CLIENT is not set/' $DEFCONFIG
+          sed -i 's/^CONFIG_HWAA=y.*/# CONFIG_HWAA is not set/' $DEFCONFIG
+
+          echo "[+] All setup done."
+
+      - name: 🧰 Patch Kernel of Re:Kernel
+        uses: ./.github/workflows/patch-rekernel
+
+      - name: 💿 Patch Kernel of Droidspaces
+        uses: ./.github/workflows/patch-droidspaces
+
+      - name: 🔒 Patch Kernel of Baseband Guard
+        uses: ./.github/workflows/patch-baseband-guard
+
+      - name: 🚀 Build Process
+        uses: ./.github/workflows/build-process
+
+      - name: 🔩 Pack Process
+        uses: ./.github/workflows/pack-process
+
+      - name: ✏️ Upload Artifacts
+        uses: ./.github/workflows/upload-files
