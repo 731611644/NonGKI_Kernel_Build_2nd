@@ -17,8 +17,20 @@ env:
   KERNEL_SOURCE : "https://github.com/731611644/honor50se_kernel.git"
   KERNEL_BRANCH : "main"
 
-  # 编译器：LLVM 14（4.14 内核推荐用 Clang 12-14）
-  CLANG_SOURCE : "https://github.com/llvm/llvm-project/releases/download/llvmorg-14.0.6/clang+llvm-14.0.6-x86_64-linux-gnu-rhel-8.4.tar.xz"
+  # ============================================================
+  # 【修改 1】Clang 版本：14 → 12
+  # ------------------------------------------------------------
+  # 原因：
+  #   Clang 14 太新，对 4.14 老内核兼容性不好。
+  #   编译时某些步骤（vdso、scripts/mod）会绕过 LLVM 集成汇编器，
+  #   去调用系统的 /usr/bin/as（x86 汇编器），
+  #   然后报 "unrecognized option '-EL'" 错误。
+  #   （-EL 是 ARM64 小端选项，x86 的 as 不认识）
+  #
+  # 解决方案：
+  #   换成 Clang 12，这是编译 4.14 内核最稳定的版本。
+  # ============================================================
+  CLANG_SOURCE : "https://github.com/llvm/llvm-project/releases/download/llvmorg-12.0.1/clang+llvm-12.0.1-x86_64-linux-gnu.tar.xz"
   CLANG_BRANCH : ""
 
   # GCC 工具链（AOSP GCC 4.9，只提供 binutils，不含 gcc 本体）
@@ -88,6 +100,19 @@ env:
   GENERATE_CHIP: "mediatek"
 
   BUILD_DEBUGGER: "true"
+
+  # ============================================================
+  # 【修改 2】SKIP_PATCH: true
+  # ------------------------------------------------------------
+  # 原因：
+  #   SUSFS 补丁要修改 fs/notify/fdinfo.c 和 fs/proc/task_mmu.c，
+  #   但华为改过这两个文件，补丁上下文对不上，打不上。
+  #
+  # 解决方案：
+  #   开启 SKIP_PATCH，跳过打不上的补丁。
+  #   影响：inotify 隐藏和 smaps 隐藏会失效，
+  #   但其他 SUSFS 功能（隐藏挂载点、SELinux 审计等）正常。
+  # ============================================================
   SKIP_PATCH: "true"
 
   BUILD_OTHER_CONFIG: "false"
@@ -128,36 +153,34 @@ jobs:
           # 【修复 1】荣耀内核驱动目录结构问题
           # ------------------------------------------------------------
           # 问题原因：
-          #   荣耀开源内核时，把联发科的连接性驱动（WiFi/蓝牙/GPS/FM）
-          #   从 vendor/mediatek/kernel_modules/connectivity/ 目录
-          #   移到了 kernel/drivers/misc/mediatek/connectivity/ 目录里，
+          #   荣耀开源内核时，把联发科连接性驱动（WiFi/蓝牙/GPS/FM）
+          #   从 vendor/mediatek/kernel_modules/connectivity/
+          #   移到了 kernel/drivers/misc/mediatek/connectivity/ 里，
           #   但是没有修改 Makefile。
-          #   Makefile 还是按老路径去 vendor/mediatek/kernel_modules/ 找驱动，
+          #   Makefile 还是按老路径去 vendor 找驱动，
           #   导致报 "conninfra is not existed" 错误。
           #
           # 解决方法：
-          #   在编译前，把驱动目录搬回 Makefile 期望的位置。
+          #   编译前把驱动目录搬回 Makefile 期望的位置。
           #   Makefile 会自动创建符号链接指回来，不影响编译。
           # ============================================================
 
           # 1. 创建 Makefile 期望的 vendor 目录结构
-          #    （GitHub 仓库里没有这个目录，需要在这里创建）
           mkdir -p ../vendor/mediatek/kernel_modules/connectivity/wlan/adaptor
           mkdir -p ../vendor/mediatek/kernel_modules/connectivity/wlan/core
-          mkdir -p ../vendor/mediatek/kernel_modules/connectivity/bt/mt66xx
 
-          # 2. 把 6 个驱动目录从 kernel 里搬到 vendor 对应位置
-          #    对应关系（Makefile 要找的名字 ← 实际目录名）：
-          #    conninfra       ← wmt_drv         （WMT连接基础设施，里面有 conninfra 子目录）
+          # 2. 搬移驱动到 vendor 对应位置
+          #    对应关系（Makefile 期望的名字 ← 实际目录名）：
+          #    conninfra       ← wmt_drv         （WMT 连接基础设施）
           #    wlan/adaptor    ← wmt_chrdev_wifi （WiFi 字符设备驱动）
-          #    wlan/core/gen4m ← wlan_drv_gen4m  （gen4m WiFi 核心驱动）
-          #    bt/mt66xx/connac2 ← bt             （蓝牙驱动）
-          #    fmradio         ← fmradio          （FM 收音机，名字一样）
-          #    gps             ← gps_drv          （GPS 驱动）
+          #    wlan/core/gen4m ← wlan_drv_gen4m  （gen4m WiFi 核心）
+          #    bt              ← bt              （蓝牙驱动）
+          #    fmradio         ← fmradio         （FM 收音机）
+          #    gps             ← gps_drv         （GPS 驱动）
           mv drivers/misc/mediatek/connectivity/wmt_drv         ../vendor/mediatek/kernel_modules/connectivity/conninfra
           mv drivers/misc/mediatek/connectivity/wmt_chrdev_wifi ../vendor/mediatek/kernel_modules/connectivity/wlan/adaptor
           mv drivers/misc/mediatek/connectivity/wlan_drv_gen4m  ../vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m
-          mv drivers/misc/mediatek/connectivity/bt              ../vendor/mediatek/kernel_modules/connectivity/bt/mt66xx/connac2
+          mv drivers/misc/mediatek/connectivity/bt              ../vendor/mediatek/kernel_modules/connectivity/bt
           mv drivers/misc/mediatek/connectivity/fmradio         ../vendor/mediatek/kernel_modules/connectivity/fmradio
           mv drivers/misc/mediatek/connectivity/gps_drv         ../vendor/mediatek/kernel_modules/connectivity/gps
 
@@ -169,8 +192,7 @@ jobs:
           #   git 记录的也是无执行权限，GitHub Actions clone 下来也没有。
           #   Makefile 直接执行 clang-android.sh 时报 "Permission denied"。
           #
-          # 解决方法：
-          #   编译前 chmod +x 恢复执行权限。
+          # 解决方法：编译前 chmod +x 恢复执行权限。
           # ============================================================
           chmod +x scripts/clang-android.sh
 
@@ -178,12 +200,10 @@ jobs:
           # 【修复 3】关闭华为安全检测选项
           # ------------------------------------------------------------
           # 问题原因：
-          #   华为内核里有很多安全检测功能（root检测、完整性校验等），
-          #   这些功能跟 KernelSU/SUSFS 冲突，必须关掉。
+          #   华为内核有很多安全检测功能（root检测、完整性校验等），
+          #   跟 KernelSU/SUSFS 冲突，必须关掉。
           #
-          # 解决方法：
-          #   用 sed 把 defconfig 里的 =y 改成 is not set。
-          #   不存在的选项 sed 会自动跳过，不会出错。
+          # 解决方法：用 sed 把 defconfig 里的 =y 改成 is not set。
           # ============================================================
           DEFCONFIG=arch/arm64/configs/merge_full_k6877v1_64_defconfig
 
@@ -204,30 +224,4 @@ jobs:
           sed -i 's/^CONFIG_HUAWEI_EIMA_ACCESS_CONTROL=y.*/# CONFIG_HUAWEI_EIMA_ACCESS_CONTROL is not set/' $DEFCONFIG
           sed -i 's/^CONFIG_HW_DOUBLE_FREE_DYNAMIC_CHECK=y.*/# CONFIG_HW_DOUBLE_FREE_DYNAMIC_CHECK is not set/' $DEFCONFIG
           sed -i 's/^CONFIG_HKIP_ATKINFO=y.*/# CONFIG_HKIP_ATKINFO is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_HW_KERNEL_STP=y.*/# CONFIG_HW_KERNEL_STP is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_HISI_HHEE=y.*/# CONFIG_HISI_HHEE is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_HISI_HHEE_TOKEN=y.*/# CONFIG_HISI_HHEE_TOKEN is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_HISI_DIEID=y.*/# CONFIG_HISI_DIEID is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_HISI_SUBPMU=y.*/# CONFIG_HISI_SUBPMU is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_TEE_ANTIROOT_CLIENT=y.*/# CONFIG_TEE_ANTIROOT_CLIENT is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_HWAA=y.*/# CONFIG_HWAA is not set/' $DEFCONFIG
-
-          echo "[+] All setup done."
-
-      - name: 🧰 Patch Kernel of Re:Kernel
-        uses: ./.github/workflows/patch-rekernel
-
-      - name: 💿 Patch Kernel of Droidspaces
-        uses: ./.github/workflows/patch-droidspaces
-
-      - name: 🔒 Patch Kernel of Baseband Guard
-        uses: ./.github/workflows/patch-baseband-guard
-
-      - name: 🚀 Build Process
-        uses: ./.github/workflows/build-process
-
-      - name: 🔩 Pack Process
-        uses: ./.github/workflows/pack-process
-
-      - name: ✏️ Upload Artifacts
-        uses: ./.github/workflows/upload-files
+          sed -i 's/^CONFIG_HW_KERNEL_STP=y.
