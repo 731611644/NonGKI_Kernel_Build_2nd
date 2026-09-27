@@ -9,31 +9,25 @@ env:
   DEVICE_NAME : "honor_50_se"
   DEVICE_CODENAME : "jlh_an00"
 
-  # Clang 编译器参数（4.14 内核需要用 Clang + GCC 组合）
+  # ============================================================
+  # 编译器配置（照抄原作者，针对 4.14 内核）
+  # ------------------------------------------------------------
+  # 原作者 wiki 说明：
+  #   内核 ≤ 4.14：用 AOSP Clang 12 + Google GCC 4.9
+  #   EXTRA_CMDS 只需 LD=ld.lld（不要加 LLVM=1 LLVM_IAS=1，那是 ≥4.19 用的）
+  # ============================================================
   CUSTOM_CMDS : "CLANG_TRIPLE=aarch64-linux-gnu-"
-  EXTRA_CMDS : "LD=ld.lld LLVM=1 LLVM_IAS=1"
+  EXTRA_CMDS : "LD=ld.lld"
 
-  # 内核源码地址（你的 GitHub 仓库）
+  # 内核源码地址
   KERNEL_SOURCE : "https://github.com/731611644/honor50se_kernel.git"
   KERNEL_BRANCH : "main"
 
-  # ============================================================
-  # 【修改 1】Clang 版本：14 → 12
-  # ------------------------------------------------------------
-  # 原因：
-  #   Clang 14 太新，对 4.14 老内核兼容性不好。
-  #   编译时某些步骤（vdso、scripts/mod）会绕过 LLVM 集成汇编器，
-  #   去调用系统的 /usr/bin/as（x86 汇编器），
-  #   然后报 "unrecognized option '-EL'" 错误。
-  #   （-EL 是 ARM64 小端选项，x86 的 as 不认识）
-  #
-  # 解决方案：
-  #   换成 Clang 12，这是编译 4.14 内核最稳定的版本。
-  # ============================================================
-  CLANG_SOURCE : "https://github.com/llvm/llvm-project/releases/download/llvmorg-12.0.1/clang+llvm-12.0.1-x86_64-linux-gnu.tar.xz"
-  CLANG_BRANCH : ""
+  # Clang 12（LineageOS r416183b，对应 AOSP Clang 12）
+  CLANG_SOURCE : "https://github.com/LineageOS/android_prebuilts_clang_kernel_linux-x86_clang-r416183b.git"
+  CLANG_BRANCH : "lineage-20.0"
 
-  # GCC 工具链（AOSP GCC 4.9，只提供 binutils，不含 gcc 本体）
+  # GCC 4.9（AOSP，只提供 binutils）
   GCC_GNU : false
   GCC_64_SOURCE : "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9.git"
   GCC_64_BRANCH : "android12L-release"
@@ -46,13 +40,13 @@ env:
   DEFCONFIG_ORIGIN_IMAGE: ""
   DEFCONFIG_FROM_BOOT: false
 
-  # KernelSU 配置（自动获取，用 ReSukiSU 分支，支持 4.14）
+  # KernelSU（自动获取，用 ReSukiSU 分支）
   KERNELSU_SOURCE : ""
   KERNELSU_BRANCH : ""
   KERNELSU_AUTO_GET : "true"
   KERNELSU_AUTO_FORK : "resukisu"
 
-  # SUSFS 配置（开启 root 隐藏，跳过打不上的补丁）
+  # SUSFS（开启 root 隐藏）
   SUSFS_ENABLE : true
   SUSFS_FIXED : false
 
@@ -100,19 +94,6 @@ env:
   GENERATE_CHIP: "mediatek"
 
   BUILD_DEBUGGER: "true"
-
-  # ============================================================
-  # 【修改 2】SKIP_PATCH: true
-  # ------------------------------------------------------------
-  # 原因：
-  #   SUSFS 补丁要修改 fs/notify/fdinfo.c 和 fs/proc/task_mmu.c，
-  #   但华为改过这两个文件，补丁上下文对不上，打不上。
-  #
-  # 解决方案：
-  #   开启 SKIP_PATCH，跳过打不上的补丁。
-  #   影响：inotify 隐藏和 smaps 隐藏会失效，
-  #   但其他 SUSFS 功能（隐藏挂载点、SELinux 审计等）正常。
-  # ============================================================
   SKIP_PATCH: "true"
 
   BUILD_OTHER_CONFIG: "false"
@@ -152,31 +133,13 @@ jobs:
           # ============================================================
           # 【修复 1】荣耀内核驱动目录结构问题
           # ------------------------------------------------------------
-          # 问题原因：
-          #   荣耀开源内核时，把联发科连接性驱动（WiFi/蓝牙/GPS/FM）
-          #   从 vendor/mediatek/kernel_modules/connectivity/
-          #   移到了 kernel/drivers/misc/mediatek/connectivity/ 里，
-          #   但是没有修改 Makefile。
-          #   Makefile 还是按老路径去 vendor 找驱动，
-          #   导致报 "conninfra is not existed" 错误。
-          #
-          # 解决方法：
-          #   编译前把驱动目录搬回 Makefile 期望的位置。
-          #   Makefile 会自动创建符号链接指回来，不影响编译。
+          # 荣耀把联发科驱动从 vendor/mediatek/kernel_modules/connectivity/
+          # 移到了 kernel/drivers/misc/mediatek/connectivity/ 里，
+          # 但 Makefile 还按老路径找。编译前搬回去。
           # ============================================================
-
-          # 1. 创建 Makefile 期望的 vendor 目录结构
           mkdir -p ../vendor/mediatek/kernel_modules/connectivity/wlan/adaptor
           mkdir -p ../vendor/mediatek/kernel_modules/connectivity/wlan/core
 
-          # 2. 搬移驱动到 vendor 对应位置
-          #    对应关系（Makefile 期望的名字 ← 实际目录名）：
-          #    conninfra       ← wmt_drv         （WMT 连接基础设施）
-          #    wlan/adaptor    ← wmt_chrdev_wifi （WiFi 字符设备驱动）
-          #    wlan/core/gen4m ← wlan_drv_gen4m  （gen4m WiFi 核心）
-          #    bt              ← bt              （蓝牙驱动）
-          #    fmradio         ← fmradio         （FM 收音机）
-          #    gps             ← gps_drv         （GPS 驱动）
           mv drivers/misc/mediatek/connectivity/wmt_drv         ../vendor/mediatek/kernel_modules/connectivity/conninfra
           mv drivers/misc/mediatek/connectivity/wmt_chrdev_wifi ../vendor/mediatek/kernel_modules/connectivity/wlan/adaptor
           mv drivers/misc/mediatek/connectivity/wlan_drv_gen4m  ../vendor/mediatek/kernel_modules/connectivity/wlan/core/gen4m
@@ -185,25 +148,12 @@ jobs:
           mv drivers/misc/mediatek/connectivity/gps_drv         ../vendor/mediatek/kernel_modules/connectivity/gps
 
           # ============================================================
-          # 【修复 2】clang-android.sh 执行权限问题
-          # ------------------------------------------------------------
-          # 问题原因：
-          #   源码在 Windows 上解压时，Linux 的执行权限位丢失了。
-          #   git 记录的也是无执行权限，GitHub Actions clone 下来也没有。
-          #   Makefile 直接执行 clang-android.sh 时报 "Permission denied"。
-          #
-          # 解决方法：编译前 chmod +x 恢复执行权限。
+          # 【修复 2】clang-android.sh 执行权限（Windows 解压丢失）
           # ============================================================
           chmod +x scripts/clang-android.sh
 
           # ============================================================
-          # 【修复 3】关闭华为安全检测选项
-          # ------------------------------------------------------------
-          # 问题原因：
-          #   华为内核有很多安全检测功能（root检测、完整性校验等），
-          #   跟 KernelSU/SUSFS 冲突，必须关掉。
-          #
-          # 解决方法：用 sed 把 defconfig 里的 =y 改成 is not set。
+          # 【修复 3】关闭华为安全检测选项（与 KernelSU/SUSFS 冲突）
           # ============================================================
           DEFCONFIG=arch/arm64/configs/merge_full_k6877v1_64_defconfig
 
