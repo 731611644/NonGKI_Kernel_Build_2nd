@@ -107,6 +107,8 @@ jobs:
           # 3. 脚本权限
           chmod +x scripts/clang-android.sh
           chmod +x arch/arm64/kernel/vdso/gen_vdso_offsets.sh
+          chmod +x tools/build/cpio
+          find tools/ -type f -name "*.sh" -exec chmod +x {} \;
 
           # 4. 禁用华为安全检测（避免 root 被检测）
           DEFCONFIG=arch/arm64/configs/merge_full_k6877v1_64_defconfig
