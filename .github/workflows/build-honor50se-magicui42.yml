@@ -110,7 +110,11 @@ jobs:
           chmod +x tools/build/cpio
           find tools/ -type f -name "*.sh" -exec chmod +x {} \;
 
-          # 4. 禁用华为安全检测（避免 root 被检测）
+          # 4. 修复 SUSFS 补丁在 4.14 内核的笔误（flag → flags）
+          # 只匹配 ksu_handle_stat 调用，避免误伤其他代码
+          sed -i 's/ksu_handle_stat(&dfd, &fname, &flag)/ksu_handle_stat(\&dfd, \&fname, \&flags)/' fs/stat.c
+
+          # 5. 禁用华为安全检测（避免 root 被检测）
           DEFCONFIG=arch/arm64/configs/merge_full_k6877v1_64_defconfig
           sed -i 's/^CONFIG_HISI_PMALLOC=y.*/# CONFIG_HISI_PMALLOC is not set/' $DEFCONFIG
           sed -i 's/^CONFIG_HIVIEW_SELINUX=y.*/# CONFIG_HIVIEW_SELINUX is not set/' $DEFCONFIG
