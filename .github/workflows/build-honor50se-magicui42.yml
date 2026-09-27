@@ -118,7 +118,6 @@ jobs:
           cd $GITHUB_WORKSPACE/device_kernel
 
           # ===== 搬移 MediaTek connectivity 驱动到 vendor 期望路径 =====
-          # 关键：不预先创建 wlan/adaptor 目录，让 mv 把 wmt_chrdev_wifi 直接重命名为 adaptor
           mkdir -p ../vendor/mediatek/kernel_modules/connectivity/wlan/core
           mkdir -p ../vendor/mediatek/kernel_modules/connectivity/bt/mt66xx
 
@@ -129,8 +128,14 @@ jobs:
           mv drivers/misc/mediatek/connectivity/fmradio         ../vendor/mediatek/kernel_modules/connectivity/fmradio
           mv drivers/misc/mediatek/connectivity/gps_drv         ../vendor/mediatek/kernel_modules/connectivity/gps
 
-          # ===== 修复 clang-android.sh 权限 =====
+          # ===== 手动创建 bt/fmradio 符号链接（Makefile 自动创建对这两个不可靠）=====
+          VENDOR="$GITHUB_WORKSPACE/vendor/mediatek/kernel_modules/connectivity"
+          ln -sf "$VENDOR/bt/mt66xx/connac2" drivers/misc/mediatek/connectivity/bt
+          ln -sf "$VENDOR/fmradio"           drivers/misc/mediatek/connectivity/fmradio
+
+          # ===== 修复脚本执行权限 =====
           chmod +x scripts/clang-android.sh
+          chmod +x arch/arm64/kernel/vdso/gen_vdso_offsets.sh
 
           # ===== 关闭华为安全选项 =====
           DEFCONFIG=arch/arm64/configs/merge_full_k6877v1_64_defconfig
