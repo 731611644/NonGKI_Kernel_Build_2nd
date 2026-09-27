@@ -68,94 +68,27 @@ jobs:
       CCACHE_NOHASHDIR: "true"
       CCACHE_HARDLINK: "true"
     steps:
-      - name: ⏰ Checkout repository
+      - name: Checkout repository
         uses: actions/checkout@v6
-      - name: ⌛️ Compilation environment preparation
+      - name: Compilation environment preparation
         uses: ./.github/workflows/build-env
-      - name: ⚙️ Get neccssary tools
+      - name: Get necessary tools
         uses: ./.github/workflows/build-ready
-      - name: 🪝 Patch Kernel of SUSFS
+      - name: Patch Kernel of SUSFS
         uses: ./.github/workflows/patch-susfs
-      - name: 🔗 Patch for no-kprobe
+      - name: Patch for no-kprobe
         uses: ./.github/workflows/patch-no-kprobe
-      - name: 🪛 Extra Kernel Options
-        run: |
-          set -euxo pipefail
-          cd $GITHUB_WORKSPACE/device_kernel
-
-          # 1. 让 srctree 变绝对路径（修复 connectivity 符号链接路径错误）
-          sed -i 's|srctree := \.\.|srctree := $(abspath ..)|' Makefile
-
-          # 2. 把 connectivity 驱动移到 vendor/ 目录
-          #    符号链接不用管，connectivity/Makefile 会自动创建
-          VENDOR="$GITHUB_WORKSPACE/vendor/mediatek/kernel_modules/connectivity"
-          declare -A MAP=(
-            [wmt_drv]="conninfra"
-            [wmt_chrdev_wifi]="wlan/adaptor"
-            [wlan_drv_gen4m]="wlan/core/gen4m"
-            [bt]="bt/mt66xx/connac2"
-            [fmradio]="fmradio"
-            [gps_drv]="gps"
-          )
-          for SRC_NAME in "${!MAP[@]}"; do
-            DST_PATH="$VENDOR/${MAP[$SRC_NAME]}"
-            mkdir -p "$(dirname "$DST_PATH")"
-            rm -rf "$DST_PATH"
-            mv "drivers/misc/mediatek/connectivity/$SRC_NAME" "$DST_PATH"
-          done
-
-          # 3. 脚本权限
-          chmod +x scripts/clang-android.sh
-          chmod +x arch/arm64/kernel/vdso/gen_vdso_offsets.sh
-          chmod +x tools/build/cpio
-          find tools/ -type f -name "*.sh" -exec chmod +x {} \;
-
-          # 4. 修复 SUSFS 补丁问题
-          # 4a. stat.c 的笔误（flag → flags）
-          sed -i 's/ksu_handle_stat(&dfd, &fname, &flag)/ksu_handle_stat(\&dfd, \&fname, \&flags)/' fs/stat.c
-          # 4b. task_mmu.c 缺少 susfs_def.h 头文件（被拒补丁导致）
-          sed -i '1i #include <linux/susfs_def.h>' fs/proc/task_mmu.c
-
-          # 5. 禁用华为安全检测（避免 root 被检测）
-          DEFCONFIG=arch/arm64/configs/merge_full_k6877v1_64_defconfig
-          sed -i 's/^CONFIG_HISI_PMALLOC=y.*/# CONFIG_HISI_PMALLOC is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_HIVIEW_SELINUX=y.*/# CONFIG_HIVIEW_SELINUX is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_HISI_SELINUX_EBITMAP_RO=y.*/# CONFIG_HISI_SELINUX_EBITMAP_RO is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_HISI_SELINUX_PROT=y.*/# CONFIG_HISI_SELINUX_PROT is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_HISI_RO_LSM_HOOKS=y.*/# CONFIG_HISI_RO_LSM_HOOKS is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_INTEGRITY=y.*/# CONFIG_INTEGRITY is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_INTEGRITY_AUDIT=y.*/# CONFIG_INTEGRITY_AUDIT is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_HUAWEI_CRYPTO_TEST_MDPP=y.*/# CONFIG_HUAWEI_CRYPTO_TEST_MDPP is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_HUAWEI_SELINUX_DSM=y.*/# CONFIG_HUAWEI_SELINUX_DSM is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_HUAWEI_HIDESYMS=y.*/# CONFIG_HUAWEI_HIDESYMS is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_HW_SLUB_SANITIZE=y.*/# CONFIG_HW_SLUB_SANITIZE is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_HUAWEI_PROC_CHECK_ROOT=y.*/# CONFIG_HUAWEI_PROC_CHECK_ROOT is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_HW_ROOT_SCAN=y.*/# CONFIG_HW_ROOT_SCAN is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_HUAWEI_EIMA=y.*/# CONFIG_HUAWEI_EIMA is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_HUAWEI_EIMA_ACCESS_CONTROL=y.*/# CONFIG_HUAWEI_EIMA_ACCESS_CONTROL is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_HW_DOUBLE_FREE_DYNAMIC_CHECK=y.*/# CONFIG_HW_DOUBLE_FREE_DYNAMIC_CHECK is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_HKIP_ATKINFO=y.*/# CONFIG_HKIP_ATKINFO is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_HW_KERNEL_STP=y.*/# CONFIG_HW_KERNEL_STP is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_HISI_HHEE=y.*/# CONFIG_HISI_HHEE is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_HISI_HHEE_TOKEN=y.*/# CONFIG_HISI_HHEE_TOKEN is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_HISI_DIEID=y.*/# CONFIG_HISI_DIEID is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_HISI_SUBPMU=y.*/# CONFIG_HISI_SUBPMU is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_TEE_ANTIROOT_CLIENT=y.*/# CONFIG_TEE_ANTIROOT_CLIENT is not set/' $DEFCONFIG
-          sed -i 's/^CONFIG_HWAA=y.*/# CONFIG_HWAA is not set/' $DEFCONFIG
-
-          # 6. 禁用 WERROR，避免 Clang 严格性导致老代码编译失败
-          sed -i 's/^CONFIG_WERROR=y.*/# CONFIG_WERROR is not set/' $DEFCONFIG
-
-          echo "[+] All setup done."
-      - name: 🧰 Patch Kernel of Re:Kernel
+      - name: Extra Kernel Options
+        run: bash .github/workflows/setup-honor50se.sh
+      - name: Patch Kernel of ReKernel
         uses: ./.github/workflows/patch-rekernel
-      - name: 💿 Patch Kernel of Droidspaces
+      - name: Patch Kernel of Droidspaces
         uses: ./.github/workflows/patch-droidspaces
-      - name: 🔒 Patch Kernel of Baseband Guard
+      - name: Patch Kernel of Baseband Guard
         uses: ./.github/workflows/patch-baseband-guard
-      - name: 🚀 Build Process
+      - name: Build Process
         uses: ./.github/workflows/build-process
-      - name: 🔩 Pack Process
+      - name: Pack Process
         uses: ./.github/workflows/pack-process
-      - name: ✏️ Upload Artifacts
+      - name: Upload Artifacts
         uses: ./.github/workflows/upload-files
