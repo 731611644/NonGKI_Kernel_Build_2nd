@@ -1,93 +1,64 @@
 name: Build Honor 50 SE (MagicUI 4.2) (Kernel 4.14)
-
 on:
   workflow_call:
   workflow_dispatch:
-
 env:
   DEVICE_NAME : "honor_50_se"
   DEVICE_CODENAME : "jlh_an00"
-
   CUSTOM_CMDS : "CLANG_TRIPLE=aarch64-linux-gnu-"
   EXTRA_CMDS : "LD=ld.lld"
-
   KERNEL_SOURCE : "https://github.com/731611644/honor50se_kernel.git"
   KERNEL_BRANCH : "main"
-
   CLANG_SOURCE : "https://github.com/LineageOS/android_prebuilts_clang_kernel_linux-x86_clang-r416183b.git"
   CLANG_BRANCH : "lineage-20.0"
-
   GCC_GNU : false
   GCC_64_SOURCE : "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9.git"
   GCC_64_BRANCH : "android12L-release"
   GCC_32_SOURCE : "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9.git"
   GCC_32_BRANCH : "android12L-release"
-
   DEFCONFIG_SOURCE: ""
   DEFCONFIG_NAME : "merge_full_k6877v1_64_defconfig"
   DEFCONFIG_ORIGIN_IMAGE: ""
   DEFCONFIG_FROM_BOOT: false
-
   KERNELSU_SOURCE : ""
   KERNELSU_BRANCH : ""
-
   KERNELSU_AUTO_GET : "true"
   KERNELSU_AUTO_FORK : "resukisu"
-
   SUSFS_ENABLE : true
   SUSFS_FIXED : true
-
   AK3_SOURCE : "https://github.com/osm0sis/AnyKernel3.git"
   AK3_BRANCH : "master"
-
   BOOT_SOURCE : ""
-
   NEED_DTBO : false
   NEED_SAFE_DTBO : false
-
   ROM_TEXT : "magicui42"
-
   PYTHON_VERSION: "3"
-
   PACK_METHOD: "AnyKernel3"
   PACK_KMODULES: "false"
-
   KERNELSU_METHOD: "shell"
   KERNELSU_SUS_PATCH: "false"
-
   PATCHES_SOURCE: "JackA1ltman/NonGKI_Kernel_Patches"
   PATCHES_BRANCH: "mi_kernel"
-
   SUSFS_FOLDER_FIXED: ""
   SUSFS_PATCH_FIXED: ""
-
   REKERNEL_ENABLE: "false"
   DROIDSPACES_ENABLE: "false"
   NOMOUNT_ENABLE: "false"
-
   HOOK_METHOD: "syscall"
-
   KERNEL_PATCH: "false"
-
   KPM_ENABLE: "false"
   KPM_INLINE: "false"
   KPM_KPATCH_NEXT: "false"
   KPM_PATCH_SOURCE: "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU_patch/refs/heads/main/kpm/patch_linux"
-
   BASEBAND_GUARD_ENABLE: "false"
   BASEBAND_GUARD_BOOT: "false"
-
   GENERATE_DTB: "false"
   GENERATE_CHIP: "mediatek"
-
   BUILD_DEBUGGER: "true"
   SKIP_PATCH: "true"
-
   BUILD_OTHER_CONFIG: "false"
   MERGE_CONFIG_FILES: ""
-
   FREE_MORE_SPACE: "false"
-
 jobs:
   build-kernel:
     name: Honor 50 SE (MagicUI 4.2) (Kernel 4.14)
@@ -99,26 +70,25 @@ jobs:
     steps:
       - name: ⏰ Checkout repository
         uses: actions/checkout@v6
-
       - name: ⌛️ Compilation environment preparation
         uses: ./.github/workflows/build-env
-
       - name: ⚙️ Get neccssary tools
         uses: ./.github/workflows/build-ready
-
       - name: 🪝 Patch Kernel of SUSFS
         uses: ./.github/workflows/patch-susfs
-
       - name: 🔗 Patch for no-kprobe
         uses: ./.github/workflows/patch-no-kprobe
-
       - name: 🪛 Extra Kernel Options
         run: |
           set -euxo pipefail
           cd $GITHUB_WORKSPACE/device_kernel
 
-          VENDOR="$GITHUB_WORKSPACE/vendor/mediatek/kernel_modules/connectivity"
+          # 1. 让 srctree 变绝对路径（修复 connectivity 符号链接路径错误）
+          sed -i 's|srctree := \.\.|srctree := $(abspath ..)|' Makefile
 
+          # 2. 把 connectivity 驱动移到 vendor/ 目录
+          #    符号链接不用管，connectivity/Makefile 会自动创建
+          VENDOR="$GITHUB_WORKSPACE/vendor/mediatek/kernel_modules/connectivity"
           declare -A MAP=(
             [wmt_drv]="conninfra"
             [wmt_chrdev_wifi]="wlan/adaptor"
@@ -127,38 +97,18 @@ jobs:
             [fmradio]="fmradio"
             [gps_drv]="gps"
           )
-
           for SRC_NAME in "${!MAP[@]}"; do
-            SRC_PATH="$GITHUB_WORKSPACE/device_kernel/drivers/misc/mediatek/connectivity/$SRC_NAME"
             DST_PATH="$VENDOR/${MAP[$SRC_NAME]}"
-
             mkdir -p "$(dirname "$DST_PATH")"
-
-            # 关键：先删除目标，防止 mv 把源放进目标内部导致嵌套
-            if [ -e "$SRC_PATH" ] || [ -L "$SRC_PATH" ]; then
-              rm -rf "$DST_PATH"
-              mv "$SRC_PATH" "$DST_PATH"
-            fi
-
-            rm -rf "$SRC_PATH"
-            ln -s "$DST_PATH" "$SRC_PATH"
-
-            # 验证 Makefile 存在，失败就打印目录结构
-            if [ ! -f "$SRC_PATH/Makefile" ]; then
-              echo "::error::$SRC_NAME Makefile not found at $DST_PATH"
-              echo "=== find $DST_PATH (maxdepth 3) ==="
-              find "$DST_PATH" -maxdepth 3 -type f -name Makefile -print 2>&1 || true
-              echo "=== ls -la $DST_PATH ==="
-              ls -la "$DST_PATH" 2>&1 || true
-              exit 1
-            fi
-
-            echo "$SRC_NAME: OK -> $(readlink "$SRC_PATH")"
+            rm -rf "$DST_PATH"
+            mv "drivers/misc/mediatek/connectivity/$SRC_NAME" "$DST_PATH"
           done
 
+          # 3. 脚本权限
           chmod +x scripts/clang-android.sh
           chmod +x arch/arm64/kernel/vdso/gen_vdso_offsets.sh
 
+          # 4. 禁用华为安全检测（避免 root 被检测）
           DEFCONFIG=arch/arm64/configs/merge_full_k6877v1_64_defconfig
           sed -i 's/^CONFIG_HISI_PMALLOC=y.*/# CONFIG_HISI_PMALLOC is not set/' $DEFCONFIG
           sed -i 's/^CONFIG_HIVIEW_SELINUX=y.*/# CONFIG_HIVIEW_SELINUX is not set/' $DEFCONFIG
@@ -186,21 +136,15 @@ jobs:
           sed -i 's/^CONFIG_HWAA=y.*/# CONFIG_HWAA is not set/' $DEFCONFIG
 
           echo "[+] All setup done."
-
       - name: 🧰 Patch Kernel of Re:Kernel
         uses: ./.github/workflows/patch-rekernel
-
       - name: 💿 Patch Kernel of Droidspaces
         uses: ./.github/workflows/patch-droidspaces
-
       - name: 🔒 Patch Kernel of Baseband Guard
         uses: ./.github/workflows/patch-baseband-guard
-
       - name: 🚀 Build Process
         uses: ./.github/workflows/build-process
-
       - name: 🔩 Pack Process
         uses: ./.github/workflows/pack-process
-
       - name: ✏️ Upload Artifacts
         uses: ./.github/workflows/upload-files
