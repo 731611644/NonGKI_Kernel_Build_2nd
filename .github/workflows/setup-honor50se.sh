@@ -63,6 +63,11 @@ with open('fs/proc/task_mmu.c', 'w') as f:
 # 5. 禁用 WERROR
 find . -name "Makefile" -exec sed -i 's/-Werror/-Wno-error/g' {} +
 
+# 5a. 禁用 Clang 对 strcpy 的 stpcpy 优化（内核没有 stpcpy 实现）
+sed -i 's/^KBUILD_CFLAGS\s*+=/KBUILD_CFLAGS += -fno-builtin-stpcpy /' Makefile
+# 如果上面没匹配到，追加一行
+grep -q "fno-builtin-stpcpy" Makefile || echo 'KBUILD_CFLAGS += -fno-builtin-stpcpy' >> Makefile
+
 # 5a. 移除被华为删除源码的 netfilter 模块
 sed -i 's/^obj-\$(CONFIG_NETFILTER_XT_TARGET_TCPMSS).*/#obj-\$(CONFIG_NETFILTER_XT_TARGET_TCPMSS) += xt_TCPMSS.o/' net/netfilter/Makefile
 
