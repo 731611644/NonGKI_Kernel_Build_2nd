@@ -26,6 +26,7 @@ done
 chmod +x scripts/clang-android.sh
 chmod +x arch/arm64/kernel/vdso/gen_vdso_offsets.sh
 chmod +x tools/build/cpio
+chmod +x scripts/dtc/dtc_overlay
 find tools/ -type f -name "*.sh" -exec chmod +x {} \;
 
 # 4. 修复 SUSFS 补丁问题
@@ -260,5 +261,8 @@ sed -i 's/^CONFIG_HISI_DIEID=y.*/# CONFIG_HISI_DIEID is not set/' $DEFCONFIG
 sed -i 's/^CONFIG_HISI_SUBPMU=y.*/# CONFIG_HISI_SUBPMU is not set/' $DEFCONFIG
 sed -i 's/^CONFIG_TEE_ANTIROOT_CLIENT=y.*/# CONFIG_TEE_ANTIROOT_CLIENT is not set/' $DEFCONFIG
 sed -i 's/^CONFIG_HWAA=y.*/# CONFIG_HWAA is not set/' $DEFCONFIG
+
+# 8. 禁用被华为删除源码的内核模块
+sed -i 's/^CONFIG_NETFILTER_XT_TARGET_TCPMSS=y.*/# CONFIG_NETFILTER_XT_TARGET_TCPMSS is not set/' $DEFCONFIG
 
 echo "[+] All setup done."
