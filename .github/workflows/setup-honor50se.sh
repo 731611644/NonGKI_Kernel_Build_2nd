@@ -66,27 +66,28 @@ find . -name "Makefile" -exec sed -i 's/-Werror/-Wno-error/g' {} +
 # 5a. 移除被华为删除源码的 netfilter 模块
 sed -i 's/^obj-\$(CONFIG_NETFILTER_XT_TARGET_TCPMSS).*/#obj-\$(CONFIG_NETFILTER_XT_TARGET_TCPMSS) += xt_TCPMSS.o/' net/netfilter/Makefile
 
-# 5a. 创建缺失的标准内核头文件（华为开源版遗漏）
+# 5a. 创建缺失的 netfilter 包装头文件（华为删除了 include/linux/netfilter/ 下的标准头文件）
 mkdir -p include/linux/netfilter
-cat > include/linux/netfilter/xt_connmark.h <<'EOF'
-#ifndef _XT_CONNMARK_H
-#define _XT_CONNMARK_H
-#include <linux/types.h>
-enum {
-	XT_CONNMARK_SET = 0,
-	XT_CONNMARK_SAVE,
-	XT_CONNMARK_RESTORE
-};
-struct xt_connmark_tginfo1 {
-	__u32 ctmark, ctmask, nfmask;
-	__u8 mode;
-};
-struct xt_connmark_mtinfo1 {
-	__u32 mark, mask;
-	__u8 invert;
-};
-#endif
-EOF
+for hdr in nf_conntrack_tuple_common.h nf_log.h nf_nat.h nf_tables.h nf_tables_compat.h \
+           nfnetlink_compat.h nfnetlink_conntrack.h nfnetlink_cthelper.h nfnetlink_cttimeout.h \
+           nfnetlink_log.h nfnetlink_queue.h \
+           xt_AUDIT.h xt_CHECKSUM.h xt_CLASSIFY.h xt_CONNSECMARK.h xt_CT.h xt_DSCP.h \
+           xt_HMARK.h xt_IDLETIMER.h xt_LED.h xt_LOG.h xt_NFLOG.h xt_NFQUEUE.h xt_RATEEST.h \
+           xt_SECMARK.h xt_SYNPROXY.h xt_TCPOPTSTRIP.h xt_TEE.h xt_TPROXY.h \
+           xt_addrtype.h xt_bpf.h xt_cgroup.h xt_cluster.h xt_comment.h xt_connbytes.h \
+           xt_connlimit.h xt_connmark.h xt_conntrack.h xt_cpu.h xt_dccp.h xt_devgroup.h \
+           xt_dscp.h xt_ecn.h xt_esp.h xt_helper.h xt_ipcomp.h xt_iprange.h xt_ipvs.h \
+           xt_l2tp.h xt_length.h xt_limit.h xt_mac.h xt_mark.h xt_multiport.h xt_nfacct.h \
+           xt_osf.h xt_owner.h xt_pkttype.h xt_policy.h xt_quota.h xt_realm.h xt_recent.h \
+           xt_rpfilter.h xt_sctp.h xt_set.h xt_socket.h xt_state.h xt_statistic.h \
+           xt_string.h xt_tcpmss.h xt_tcpudp.h xt_time.h xt_u32.h; do
+  [ -f "include/linux/netfilter/$hdr" ] && continue
+  # 找 uapi 下对应的文件（忽略大小写）
+  uapi_name=$(find include/uapi/linux/netfilter/ -iname "$hdr" 2>/dev/null | head -1 | xargs basename 2>/dev/null)
+  if [ -n "$uapi_name" ]; then
+    echo "#include <uapi/linux/netfilter/$uapi_name>" > "include/linux/netfilter/$hdr"
+  fi
+done
 
 # 5b. 只编译 conninfra，跳过 wlan/bt/fm/gps
 CONN_MK=drivers/misc/mediatek/connectivity/Makefile
