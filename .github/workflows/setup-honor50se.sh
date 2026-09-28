@@ -312,28 +312,62 @@ if [ -f "$WMT_MK" ]; then
   echo "[+] wlan/adaptor Makefile: added conninfra include paths"
 fi
 
-# 8.3 验证：列出 conninfra 下实际存在的关键头文件，确认它们没有丢失
-echo "[+] Verifying conninfra headers exist in source tree:"
+# 8.3 验证：在整个内核源码树搜索关键头文件
+# 说明: 之前只在 conninfra 目录搜，范围太窄。
+#       这些头文件可能在 drivers/misc/mediatek/connectivity/ 的其他子目录，
+#       或在 drivers/misc/mediatek/include/ 等位置。
+#       先在整个源码树搜索，找到的就加入 include 路径，不用创建 stub。
+KERNEL_SRC="$GITHUB_WORKSPACE/device_kernel"
+echo "[+] Searching for conninfra headers in entire source tree:"
+FOUND_HEADERS=""   # 记录找到的头文件及其目录
+MISSING_HEADERS="" # 记录确实不存在的头文件
 for hdr in wmt_exp.h stp_exp.h osal_typedef.h wmt_core.h wmt_dev.h wmt_task.h \
            conninfra_ext.h mtk_wcn_consys_hw.h consys_hw.h conninfra_core.h; do
-  found=$(find "$CONNINFRA_DIR" -name "$hdr" 2>/dev/null | head -1)
+  # 在整个内核源码树搜索（不限于 conninfra）
+  found=$(find "$KERNEL_SRC" "$GITHUB_WORKSPACE/vendor" -name "$hdr" 2>/dev/null | head -1)
   if [ -n "$found" ]; then
+    found_dir=$(dirname "$found")
     echo "  FOUND: $hdr -> ${found#$GITHUB_WORKSPACE/}"
+    # 如果找到的目录不在已知 include 路径中，记录下来
+    FOUND_HEADERS="$FOUND_HEADERS $found_dir:$hdr"
   else
-    echo "  MISSING: $hdr (not found in conninfra tree - will fail at compile time if needed)"
+    echo "  MISSING: $hdr (not found anywhere in source tree)"
+    MISSING_HEADERS="$MISSING_HEADERS $hdr"
   fi
 done
 
-# 8.4 创建经验证确实缺失的 conninfra 导出头文件
-# 说明: 8.3 验证确认以下头文件在 conninfra 源码树中确实不存在，
-#       但其他驱动（wlan/bt/fm/gps）会 include 它们。
-#       这些是 conninfra 的导出接口声明，实现位于 conninfra 内部。
-#       仅创建验证为 MISSING 的头文件，已存在的不覆盖。
+# 8.3b 如果头文件在源码树其他位置找到，把那些目录加入 include 路径
+if [ -n "$FOUND_HEADERS" ]; then
+  echo "[+] Adding include paths for found headers..."
+  # 收集所有找到的目录（去重）
+  FOUND_DIRS=$(echo "$FOUND_HEADERS" | tr ' ' '\n' | cut -d: -f1 | sort -u)
+  for fdir in $FOUND_DIRS; do
+    rel_path="${fdir#$GITHUB_WORKSPACE/}"
+    # 加到 conninfra Makefile
+    if [ -f "$CONNINFRA_MK" ]; then
+      grep -q "$rel_path" "$CONNINFRA_MK" || echo "ccflags-y += -I\$(TOP)/$rel_path" >> "$CONNINFRA_MK"
+    fi
+    # 加到 wlan/adaptor Makefile
+    if [ -f "$WMT_MK" ]; then
+      grep -q "$rel_path" "$WMT_MK" || echo "ccflags-y += -I\$(TOP)/$rel_path" >> "$WMT_MK"
+    fi
+    echo "  + added include: $rel_path"
+  done
+fi
+
+# 8.4 只为全源码树搜索后仍确认缺失的头文件创建 stub
+# 说明: 只有经 8.3 在整个源码树搜索后仍 MISSING 的文件才创建 stub。
+#       如果在源码树找到了，用 8.3b 的 include 路径解决，不创建 stub。
 CONNINFRA_INC="$CONNINFRA_DIR/include"
 mkdir -p "$CONNINFRA_INC"
 
+if [ -z "$MISSING_HEADERS" ]; then
+  echo "[+] All conninfra headers found in source tree - no stubs needed"
+else
+  echo "[+] Creating stubs for headers confirmed missing: $MISSING_HEADERS"
+
 # osal_typedef.h - OS 抽象层基础类型（被所有驱动引用）
-if [ ! -f "$CONNINFRA_INC/osal_typedef.h" ]; then
+if echo "$MISSING_HEADERS" | grep -qw "osal_typedef.h"; then
 cat > "$CONNINFRA_INC/osal_typedef.h" <<'EOF'
 #ifndef _OSAL_TYPEDEF_H
 #define _OSAL_TYPEDEF_H
@@ -356,11 +390,11 @@ typedef unsigned long   OSAL_ULONG;
 #define OSAL_TRUE       1
 #endif
 EOF
-echo "[+] Created osal_typedef.h"
+echo "[+] Created osal_typedef.h (stub)"
 fi
 
 # wmt_exp.h - conninfra 对 wlan/bt/fm/gps 导出的核心接口
-if [ ! -f "$CONNINFRA_INC/wmt_exp.h" ]; then
+if echo "$MISSING_HEADERS" | grep -qw "wmt_exp.h"; then
 cat > "$CONNINFRA_INC/wmt_exp.h" <<'EOF'
 #ifndef _WMT_EXP_H
 #define _WMT_EXP_H
@@ -408,11 +442,11 @@ void wmt_plat_set_therm_ctrl(int32_t level);
 int32_t wmt_wifi_modify_para(uint8_t *buf, uint32_t len);
 #endif
 EOF
-echo "[+] Created wmt_exp.h"
+echo "[+] Created wmt_exp.h (stub)"
 fi
 
 # stp_exp.h - STP 传输层导出接口（被 bt/fm 引用）
-if [ ! -f "$CONNINFRA_INC/stp_exp.h" ]; then
+if echo "$MISSING_HEADERS" | grep -qw "stp_exp.h"; then
 cat > "$CONNINFRA_INC/stp_exp.h" <<'EOF'
 #ifndef _STP_EXP_H
 #define _STP_EXP_H
@@ -426,11 +460,11 @@ int32_t stp_exp_is_enable(void);
 int32_t stp_exp_poll_data(uint8_t type, uint8_t *buf, uint32_t len);
 #endif
 EOF
-echo "[+] Created stp_exp.h"
+echo "[+] Created stp_exp.h (stub)"
 fi
 
 # wmt_core.h - WMT 核心数据结构
-if [ ! -f "$CONNINFRA_INC/wmt_core.h" ]; then
+if echo "$MISSING_HEADERS" | grep -qw "wmt_core.h"; then
 cat > "$CONNINFRA_INC/wmt_core.h" <<'EOF'
 #ifndef _WMT_CORE_H
 #define _WMT_CORE_H
@@ -444,11 +478,11 @@ typedef struct _WMT_DEV_ {
 } WMT_DEV, *P_WMT_DEV;
 #endif
 EOF
-echo "[+] Created wmt_core.h"
+echo "[+] Created wmt_core.h (stub)"
 fi
 
 # wmt_dev.h - WMT 设备操作接口
-if [ ! -f "$CONNINFRA_INC/wmt_dev.h" ]; then
+if echo "$MISSING_HEADERS" | grep -qw "wmt_dev.h"; then
 cat > "$CONNINFRA_INC/wmt_dev.h" <<'EOF'
 #ifndef _WMT_DEV_H
 #define _WMT_DEV_H
@@ -460,11 +494,11 @@ int32_t wmt_dev_open(uint8_t dev_id);
 int32_t wmt_dev_close(uint8_t dev_id);
 #endif
 EOF
-echo "[+] Created wmt_dev.h"
+echo "[+] Created wmt_dev.h (stub)"
 fi
 
 # wmt_task.h - WMT 任务/线程接口
-if [ ! -f "$CONNINFRA_INC/wmt_task.h" ]; then
+if echo "$MISSING_HEADERS" | grep -qw "wmt_task.h"; then
 cat > "$CONNINFRA_INC/wmt_task.h" <<'EOF'
 #ifndef _WMT_TASK_H
 #define _WMT_TASK_H
@@ -476,11 +510,11 @@ int32_t wmt_task_destroy(uint8_t task_id);
 int32_t wmt_task_send_msg(uint8_t task_id, uint32_t msg, uint8_t *data, uint32_t len);
 #endif
 EOF
-echo "[+] Created wmt_task.h"
+echo "[+] Created wmt_task.h (stub)"
 fi
 
 # conninfra_ext.h - conninfra 对外部的扩展接口
-if [ ! -f "$CONNINFRA_INC/conninfra_ext.h" ]; then
+if echo "$MISSING_HEADERS" | grep -qw "conninfra_ext.h"; then
 cat > "$CONNINFRA_INC/conninfra_ext.h" <<'EOF'
 #ifndef _CONNINFRA_EXT_H
 #define _CONNINFRA_EXT_H
@@ -492,11 +526,11 @@ int32_t conninfra_ext_power_on(uint8_t dev_id);
 int32_t conninfra_ext_power_off(uint8_t dev_id);
 #endif
 EOF
-echo "[+] Created conninfra_ext.h"
+echo "[+] Created conninfra_ext.h (stub)"
 fi
 
 # mtk_wcn_consys_hw.h - 连接系统硬件相关定义
-if [ ! -f "$CONNINFRA_INC/mtk_wcn_consys_hw.h" ]; then
+if echo "$MISSING_HEADERS" | grep -qw "mtk_wcn_consys_hw.h"; then
 cat > "$CONNINFRA_INC/mtk_wcn_consys_hw.h" <<'EOF'
 #ifndef _MTK_WCN_CONSYS_HW_H
 #define _MTK_WCN_CONSYS_HW_H
@@ -511,8 +545,10 @@ int32_t mtk_wcn_consys_hw_init(void);
 void mtk_wcn_consys_hw_deinit(void);
 #endif
 EOF
-echo "[+] Created mtk_wcn_consys_hw.h"
+echo "[+] Created mtk_wcn_consys_hw.h (stub)"
 fi
+
+fi  # end of MISSING_HEADERS check
 
 # =============================================================================
 # 修复 9: 禁用华为安全检测（防止 root 被检测）
