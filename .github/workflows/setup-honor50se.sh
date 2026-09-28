@@ -225,19 +225,18 @@ struct xt_tos_match_info {
 EOF
 
 # =============================================================================
-# 修复 7: 只编译 conninfra，跳过 wlan/bt/fm/gps
+# 修复 7: 保留 wlan/bt/fm/gps 驱动编译（不移除，源码完整）
 # =============================================================================
-# 问题: connectivity 目录下有 6 个子驱动，但只有 conninfra（wmt_drv）有完整源码，
-#        其他 wlan/bt/fm/gps 的源码被华为删除了，编译会失败。
-# 修复: 在 connectivity 的 Makefile 里注释掉 wlan/bt/fm/gps 的编译行。
-# 原理: 用 sed 把 "obj-y += xxx/" 改成 "#obj-y += xxx/"，跳过编译。
-# 注意: 缩进用 8 个空格（华为 Makefile 风格），不是 tab。
+# 说明: 华为开源内核包含完整的 wlan/bt/fm/gps 驱动源码
+#   - wlan_drv_gen4m: 162 个 .c 文件（WiFi 驱动）
+#   - bt: 10 个 .c 文件（蓝牙驱动）
+#   - fmradio: 26 个 .c 文件（FM 收音机驱动）
+#   - gps_drv: GPS 驱动
+# 这些驱动通过 Makefile 的符号链接机制从 vendor/ 目录编译，
+# 不需要手动注释掉。如果编译报错，应该修复错误而不是禁用驱动。
+# 注意: 之前版本曾错误地注释掉这些驱动，现已恢复。
 CONN_MK=drivers/misc/mediatek/connectivity/Makefile
-sed -i 's|^        obj-y += wmt_chrdev_wifi/|        #obj-y += wmt_chrdev_wifi/|' "$CONN_MK"
-sed -i 's|^        obj-y += wlan_drv_gen4m/|        #obj-y += wlan_drv_gen4m/|' "$CONN_MK"
-sed -i 's|^        obj-y += bt/|        #obj-y += bt/|' "$CONN_MK"
-sed -i 's|^        obj-y += fmradio/|        #obj-y += fmradio/|' "$CONN_MK"
-sed -i 's|^         obj-y += gps_drv/|        #obj-y += gps_drv/|' "$CONN_MK"
+# 不再注释掉 wlan/bt/fm/gps 的编译行，保持华为原始 Makefile 不变
 
 # =============================================================================
 # 修复 8: 创建 wmt_exp.h / stp_exp.h 等缺失头文件
