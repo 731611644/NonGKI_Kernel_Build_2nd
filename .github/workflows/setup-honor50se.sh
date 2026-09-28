@@ -89,6 +89,27 @@ for hdr in nf_conntrack_tuple_common.h nf_log.h nf_nat.h nf_tables.h nf_tables_c
   fi
 done
 
+# xt_connmark.h 需要完整定义（uapi 版本只是包装它，不能循环引用）
+cat > include/linux/netfilter/xt_connmark.h <<'EOF'
+#ifndef _XT_CONNMARK_H
+#define _XT_CONNMARK_H
+#include <linux/types.h>
+enum {
+	XT_CONNMARK_SET = 0,
+	XT_CONNMARK_SAVE,
+	XT_CONNMARK_RESTORE
+};
+struct xt_connmark_tginfo1 {
+	__u32 ctmark, ctmask, nfmask;
+	__u8 mode;
+};
+struct xt_connmark_mtinfo1 {
+	__u32 mark, mask;
+	__u8 invert;
+};
+#endif
+EOF
+
 # 5b. 只编译 conninfra，跳过 wlan/bt/fm/gps
 CONN_MK=drivers/misc/mediatek/connectivity/Makefile
 sed -i 's|^        obj-y += wmt_chrdev_wifi/|        #obj-y += wmt_chrdev_wifi/|' "$CONN_MK"
