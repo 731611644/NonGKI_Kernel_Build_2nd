@@ -29,10 +29,10 @@ chmod +x tools/build/cpio
 chmod +x scripts/dtc/dtc_overlay
 find tools/ -type f -name "*.sh" -exec chmod +x {} \;
 
-# 4. 修复 SUSFS 补丁问题
+# 4. 修复 SUSFS 补丁问题（部分由 Fixed 补丁处理，这里只处理剩余的兼容性问题）
+# flag→flags: 华为内核改了参数名，通用补丁用的是 flag（单数），但华为是 flags（复数）
 sed -i 's/ksu_handle_stat(&dfd, &fname, &flag)/ksu_handle_stat(\&dfd, \&fname, \&flags)/' fs/stat.c
-sed -i '1i #include <linux/susfs_def.h>' fs/proc/task_mmu.c
-# 只在 smap_gather_stats 函数体内把 return 0; 改成 return;（该函数是 void）
+# smap_gather_stats 函数是 void，SUSFS 补丁写的 return 0; 会编译报错
 python3 -c "
 import re
 with open('fs/proc/task_mmu.c') as f:

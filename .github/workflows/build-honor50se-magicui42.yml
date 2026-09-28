@@ -57,12 +57,13 @@ env:
 
   KERNELSU_METHOD: "shell" # shell, manual and only.
 
-  PATCHES_SOURCE: "JackA1ltman/NonGKI_Kernel_Patches" # [your_name]/[your_patch]
+  # 使用 fork 的补丁仓库，里面包含 honor50se 专属 Fixed 补丁
+  PATCHES_SOURCE: "731611644/NonGKI_Kernel_Patches" # [your_name]/[your_patch]
   PATCHES_BRANCH: "mi_kernel" # [your_branch]
 
-  # Honor 50 SE 没有专属 SUSFS 修补补丁，兼容性问题在 setup-honor50se.sh 中修复
-  SUSFS_FOLDER_FIXED: "" # Fill in your patch prefix directory here.
-  SUSFS_PATCH_FIXED: "" # Fill in your patches here.
+  # Honor 50 SE 专属 SUSFS Fixed 补丁（修复通用补丁在华为内核上失败的 4 个 hunk）
+  SUSFS_FOLDER_FIXED: "honor50se" # Fill in your patch prefix directory here.
+  SUSFS_PATCH_FIXED: "susfs_fixed" # Fill in your patches here.
 
   REKERNEL_ENABLE: "false" # if u need Re:Kernel.
   DROIDSPACES_ENABLE: "false" # if u need Droidspaces or LXC/Docker.
@@ -82,7 +83,7 @@ env:
   GENERATE_CHIP: "mediatek" # only supported for qcom and mediatek.
 
   BUILD_DEBUGGER: "true" # Output build errors.
-  SKIP_PATCH: "true" # Ignore errors found in Patch Debugger.
+  SKIP_PATCH: "false" # Ignore errors found in Patch Debugger.
 
   BUILD_OTHER_CONFIG: "false" # Merge config files.
   MERGE_CONFIG_FILES: ""
