@@ -1,142 +1,367 @@
+# =============================================================================
+# 荣耀 50 SE (JLH-AN00) 内核自动编译工作流
+# 机型: Honor 50 SE (JLH-AN00)
+# 内核版本: Linux 4.14
+# ROM: MagicUI 4.2
+# 芯片: 联发科天玑 900 (MT6877)
+# =============================================================================
+#
+# 【文件用途】
+# 本文件是 GitHub Actions 工作流配置，定义了如何在 GitHub 云端自动编译
+# 一颗适配了 KernelSU + SUSFS 的荣耀 50 SE 自定义内核。
+#
+# 【基于模板】
+# 本文件基于作者 JackA1ltman/NonGKI_Kernel_Build_2nd 的标准机型模板修改，
+# 参考了 build-redmi-note7-aosp-a15.yml，针对华为/荣耀内核的兼容性做了调整。
+#
+# 【换机型必改】（搜索 🔧 标记可快速定位）
+#   - DEVICE_NAME / DEVICE_CODENAME（机型标识）
+#   - KERNEL_SOURCE / KERNEL_BRANCH（内核源仓库）
+#   - DEFCONFIG_NAME（defconfig 文件名）
+#   - GENERATE_CHIP（芯片厂商：qcom / mediatek）
+#   - ROM_TEXT（ROM 标识）
+#   - 可能需要改：CLANG_SOURCE（4.14 用老 Clang，5.4+ 用新 Clang）
+#   - 可能需要改：EXTRA_CMDS（华为 4.14 不支持 LLVM=1）
+# =============================================================================
+
 name: Build Honor 50 SE (MagicUI 4.2) (Kernel 4.14)
 
+# 触发方式：
+#   - workflow_call: 可被其他工作流（如 build-release.yml）调用
+#   - workflow_dispatch: 可在 GitHub Actions 页面手动触发
 on:
   workflow_call:
   workflow_dispatch:
 
 env:
-  # Device env
+  # ===========================================================================
+  # 1. 设备基本信息（🔧 换机型必改）
+  # ===========================================================================
+  # DEVICE_NAME: 设备内部名称，会出现在编译产物文件名和 AnyKernel3 刷机包名中
+  #   - 荣耀 50 SE: "honor_50_se"
+  #   - 红米 Note 7: "redmi_note7"（参考作者模板）
   DEVICE_NAME : "honor_50_se"
+  # DEVICE_CODENAME: 设备代号，用于 AnyKernel3 的 target 识别
+  #   - 荣耀 50 SE: "jlh_an00"（华为内部代号）
+  #   - 红米 Note 7: "lavender"
   DEVICE_CODENAME : "jlh_an00"
 
+  # ===========================================================================
+  # 2. 编译器附加参数
+  # ===========================================================================
+  # CUSTOM_CMDS: 传给 make 的额外变量
+  #   CLANG_TRIPLE=aarch64-linux-gnu-
+  #     告诉 Clang 使用 aarch64-linux-gnu- 作为目标三元组（ARM64 交叉编译）
+  #     ⚠️ 换机型时如果编译 ARM32 内核需改成 arm-linux-gnueabi-
   CUSTOM_CMDS : "CLANG_TRIPLE=aarch64-linux-gnu-"
+  # EXTRA_CMDS: 传给 make 的额外编译选项
+  #   LD=ld.lld
+  #     使用 LLD 作为链接器（比 GNU ld 快）
+  #   ⚠️ 与作者模板差异: 作者还加了 "LLVM=1 LLVM_IAS=1"，但华为 4.14 内核
+  #      不支持纯 LLVM 编译（部分内联汇编依赖 GAS），所以这里移除了
+  #   ⚠️ 换机型时: 如果是 5.4+ 的新内核且不需要 GCC 后端，可以加回 LLVM=1
   EXTRA_CMDS : "LD=ld.lld"
 
+  # ===========================================================================
+  # 3. 内核源码仓库（🔧 换机型必改）
+  # ===========================================================================
+  # KERNEL_SOURCE: 内核源码 git 仓库地址
+  #   - 荣耀 50 SE: 你 fork 的华为开源内核 https://github.com/731611644/honor50se_kernel.git
+  #   - 红米 Note 7: 第三方内核 https://github.com/pix106/android_kernel_xiaomi_southwest-4.19.git
   KERNEL_SOURCE : "https://github.com/731611644/honor50se_kernel.git"
+  # KERNEL_BRANCH: 仓库分支名
+  #   - 荣耀 50 SE: "main"
+  #   - 红米 Note 7: "main-dynamic-3.18.0"
   KERNEL_BRANCH : "main"
 
-  # Kernel 4.14: AOSP Clang 12 + Google GCC 4.9 (per Wiki "编译器选择")
+  # ===========================================================================
+  # 4. 编译器工具链（🔧 换机型可能需要改）
+  # ===========================================================================
+  # CLANG_SOURCE: Clang 编译器下载地址
+  #   - 4.14 老内核: 用 LineageOS 的 Clang 12 (r416183b)，对新语法兼容性更好
+  #   - 5.4+ 新内核: 可以用 llvm-project 官方的 LLVM 19.1.7
+  #     示例: https://github.com/llvm/llvm-project/releases/download/llvmorg-19.1.7/LLVM-19.1.7-Linux-X64.tar.xz
+  # CLANG_BRANCH: 仓库分支（如果是 git 仓库才需要）
+  #   - LineageOS Clang: "lineage-20.0"
+  #   - llvm-project 官方包: "" (空字符串)
   CLANG_SOURCE : "https://github.com/LineageOS/android_prebuilts_clang_kernel_linux-x86_clang-r416183b.git"
   CLANG_BRANCH : "lineage-20.0"
 
+  # GCC_GNU: 是否使用 GNU 工具链而非 LLVM（false=用 AOSP GCC 4.9 作为交叉编译后端）
+  #   - 华为 4.14: false（用 Clang + AOSP GCC 4.9 组合，参考 Wiki「编译器选择」）
+  #   - 5.4+ 新内核: 可设为 true 用纯 GNU 工具链
   GCC_GNU : false
+  # GCC_64_SOURCE: ARM64 GCC 交叉编译器（用于内核中需要 GAS 的内联汇编）
+  #   固定使用 Google AOSP 的 aarch64-linux-android-4.9
   GCC_64_SOURCE : "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9.git"
   GCC_64_BRANCH : "android12L-release"
+  # GCC_32_SOURCE: ARM32 GCC 交叉编译器（用于编译 32 位兼容组件，如 vdso32）
+  #   ⚠️ 与作者模板差异: 作者红米 Note 7 用的是 x86_64-linux-android-4.9，
+  #      但华为 arm64 内核需要 arm-linux-androideabi-4.9 来编译 32 位 vdso
+  #   ⚠️ 换机型时: 如果你的内核不需要 32 位组件（如纯 64 位 ROM），可保持不变
   GCC_32_SOURCE : "https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/arm/arm-linux-androideabi-4.9.git"
   GCC_32_BRANCH : "android12L-release"
 
+  # ===========================================================================
+  # 5. Defconfig 配置文件（🔧 换机型必改）
+  # ===========================================================================
+  # DEFCONFIG_SOURCE: defconfig 源仓库（留空表示用 KERNEL_SOURCE 里的）
+  #   - 如果内核源码仓库里没有 defconfig，可单独指定一个 git 仓库
   DEFCONFIG_SOURCE: ""
+  # DEFCONFIG_NAME: defconfig 文件名（位于 arch/arm64/configs/ 下）
+  #   - 荣耀 50 SE: "merge_full_k6877v1_64_defconfig"（华为命名规则：芯片型号_64位）
+  #   - 红米 Note 7: "lavender_defconfig"
   DEFCONFIG_NAME : "merge_full_k6877v1_64_defconfig"
+  # DEFCONFIG_ORIGIN_IMAGE: 原厂 boot.img 路径（用于自动提取 defconfig，留空表示用现成的）
   DEFCONFIG_ORIGIN_IMAGE: ""
+  # DEFCONFIG_FROM_BOOT: 是否从 boot.img 自动提取 defconfig（true=从镜像提取，false=用仓库现成的）
   DEFCONFIG_FROM_BOOT: false
 
+  # ===========================================================================
+  # 6. KernelSU 配置
+  # ===========================================================================
+  # KERNELSU_SOURCE / KERNELSU_BRANCH: KernelSU 源仓库（留空 + AUTO_GET=true 表示自动选择）
   KERNELSU_SOURCE : ""
   KERNELSU_BRANCH : ""
+  # KERNELSU_AUTO_GET: 是否自动获取最新 KernelSU（true=自动从默认仓库拉取最新版）
+  KERNELSU_AUTO_GET : "true"
+  # KERNELSU_AUTO_FORK: 自动选择哪个 KernelSU 分支版本
+  #   可选值: xxksu / rsuntk / next / resukisu / sukisu
+  #   - resukisu: 重生版 KernelSU（推荐，兼容性好）
+  #   - sukisu: SukiSU（功能多，支持 KPM）
+  #   - next: KernelSU-Next（独立分支）
+  KERNELSU_AUTO_FORK : "resukisu"
 
-  KERNELSU_AUTO_GET : "true" # if u want easy setting kernelsu, u can true.
-  KERNELSU_AUTO_FORK : "resukisu" # xxksu, rsuntk, sukisu, resukisu and next
-
+  # ===========================================================================
+  # 7. SUSFS 配置（核心：内核隐藏功能）
+  # ===========================================================================
+  # SUSFS_ENABLE: 是否启用 SUSFS（强烈建议 true，提供挂载/路径/inode 隐藏）
   SUSFS_ENABLE : true
+  # SUSFS_FIXED: 是否使用机型专属 Fixed 补丁（true=用 Fixed 补丁修复通用补丁的兼容性问题）
+  #   ⚠️ 必须配合 PATCHES_SOURCE / SUSFS_FOLDER_FIXED / SUSFS_PATCH_FIXED 一起使用
   SUSFS_FIXED : true
 
+  # ===========================================================================
+  # 8. AnyKernel3 打包配置
+  # ===========================================================================
+  # AK3_SOURCE: AnyKernel3 刷机包模板仓库（固定用 osm0sis 官方版）
   AK3_SOURCE : "https://github.com/osm0sis/AnyKernel3.git"
   AK3_BRANCH : "master"
-
+  # BOOT_SOURCE: 原厂 boot.img 路径（留空表示用 AK3 自带的 flash 模式，不合并内核到 boot）
   BOOT_SOURCE : ""
-
+  # NEED_DTBO: 是否需要生成/打包 DTBO（设备树覆盖）
+  #   - 荣耀 50 SE: false（不需要）
+  #   - 高通机型: 通常 true
   NEED_DTBO : false
+  # NEED_SAFE_DTBO: 是否安全打包 DTBO（防止刷错分区）
   NEED_SAFE_DTBO : false
 
+  # ===========================================================================
+  # 9. ROM 标识（🔧 换机型/换 ROM 必改）
+  # ===========================================================================
+  # ROM_TEXT: ROM 标识文本，会出现在产物文件名中（如 jlh_an00-magicui42-时间戳-AnyKernel3.zip）
+  #   - 荣耀 50 SE MagicUI 4.2: "magicui42"
+  #   - 红米 Note 7 AOSP Android 15: "aosp_a15"
   ROM_TEXT : "magicui42"
 
-  # Other env
-  PYTHON_VERSION: "3" # Only 2(Ubuntu 22.04 and Ubuntu 20.04) or 3(Any OS Versions).
+  # ===========================================================================
+  # 10. 其他环境参数
+  # ===========================================================================
+  # PYTHON_VERSION: Python 版本（3=任意 Ubuntu 都支持，2=旧系统才用）
+  PYTHON_VERSION: "3"
+  # PACK_METHOD: 打包方式
+  #   - AnyKernel3: 用 AnyKernel3 制作刷机 zip（需要 AK3_SOURCE/AK3_BRANCH）
+  #   - MKBOOTIMG: 用 mkbootimg 直接生成 boot.img（不需要 AK3）
+  PACK_METHOD: "AnyKernel3"
+  # PACK_KMODULES: 是否打包内核模块 (.ko) 到 AnyKernel3
+  #   - false: 不打包（大多数情况）
+  #   - true: 打包（如果你需要加载额外内核模块）
+  PACK_KMODULES: "false"
+  # KERNELSU_METHOD: KernelSU 注入方式
+  #   - shell: 用 shell 脚本注入（推荐，兼容性最好）
+  #   - manual: 手动指定（需要 KERNELSU_SOURCE）
+  #   - only: 仅集成不注入
+  KERNELSU_METHOD: "shell"
+  # KERNELSU_SUS_PATCH: 是否给 KernelSU 打 SUS 补丁
+  #   - false: 不打（推荐，避免冲突）
+  KERNELSU_SUS_PATCH: "false"
 
-  PACK_METHOD: "AnyKernel3" # AnyKernel3 need SOURCE and BRANCH, MKBOOTIMG needn't it.
-  PACK_KMODULES: "false" # if u want pack kernel modules (.ko) into AnyKernel3.
+  # ===========================================================================
+  # 11. 补丁仓库配置（🔧 换机型必改）
+  # ===========================================================================
+  # PATCHES_SOURCE: NonGKI 补丁仓库（格式: 用户名/仓库名，不要带 .git）
+  #   ⚠️ 与作者模板差异: 作者用 "JackA1ltman/NonGKI_Kernel_Patches"，
+  #      这里改为你自己 fork 的仓库，因为荣耀 50 SE 的 Fixed 补丁要推到你的 fork 里
+  #   ⚠️ 换机型时: 如果新机型不需要 Fixed 补丁，可改回 "JackA1ltman/NonGKI_Kernel_Patches"
+  PATCHES_SOURCE: "731611644/NonGKI_Kernel_Patches"
+  # PATCHES_BRANCH: 补丁仓库分支名
+  PATCHES_BRANCH: "mi_kernel"
+  # SUSFS_FOLDER_FIXED: 机型专属 Fixed 补丁的目录名（在补丁仓库根目录下）
+  #   - 荣耀 50 SE: "honor50se"（对应仓库的 honor50se/susfs_fixed.patch）
+  #   - 红米 Note 7: "redmi_note_7_aosp_a15_419"
+  #   ⚠️ 留空表示不使用目录，直接用仓库根目录的补丁
+  SUSFS_FOLDER_FIXED: "honor50se"
+  # SUSFS_PATCH_FIXED: 机型专属 Fixed 补丁文件名（不带 .patch 后缀）
+  #   多个补丁用逗号分隔，如: "susfs_fixed,extra_fix"
+  SUSFS_PATCH_FIXED: "susfs_fixed"
 
-  KERNELSU_METHOD: "shell" # shell, manual and only.
+  # ===========================================================================
+  # 12. 高级功能开关（按需开启）
+  # ===========================================================================
+  # REKERNEL_ENABLE: Re:Kernel 功能（高通机型用于触摸/按键驱动）
+  #   - 荣耀 50 SE: false（联发科不需要）
+  #   - 高通机型: 通常 true
+  REKERNEL_ENABLE: "false"
+  # DROIDSPACES_ENABLE: Droidspaces（LXC/Docker 容器支持）
+  #   - false: 不启用（大多数情况）
+  #   - true: 启用（需要内核开启 cgroup/namespace 支持）
+  DROIDSPACES_ENABLE: "false"
+  # NOMOUNT_ENABLE: NoMount（防止挂载检测，隐藏挂载点）
+  #   ⚠️ 与作者模板差异: 作者默认 false，这里改为 true
+  #   原因: 华为内核的挂载检测比较严格，NoMount 能更好地隐藏 root
+  NOMOUNT_ENABLE: "true"
 
-  # 使用 fork 的补丁仓库，里面包含 honor50se 专属 Fixed 补丁
-  PATCHES_SOURCE: "731611644/NonGKI_Kernel_Patches" # [your_name]/[your_patch]
-  PATCHES_BRANCH: "mi_kernel" # [your_branch]
+  # HOOK_METHOD: KernelSU 的 hook 注入方式
+  #   - syscall: 通过 syscall hook（推荐，兼容性好）
+  #   - manual: 手动指定 hook 点
+  HOOK_METHOD: "syscall"
 
-  # Honor 50 SE 专属 SUSFS Fixed 补丁（修复通用补丁在华为内核上失败的 4 个 hunk）
-  SUSFS_FOLDER_FIXED: "honor50se" # Fill in your patch prefix directory here.
-  SUSFS_PATCH_FIXED: "susfs_fixed" # Fill in your patches here.
-
-  REKERNEL_ENABLE: "false" # if u need Re:Kernel.
-  DROIDSPACES_ENABLE: "false" # if u need Droidspaces or LXC/Docker.
-  NOMOUNT_ENABLE: "true" # if u need NoMount.
-
-  HOOK_METHOD: "syscall" # Manual hook method -> syscall.
-
-  KPM_ENABLE: "false" # Anyone devices.
-  KPM_INLINE: "false" # Only use it for SukiSU-Ultra.
-  KPM_KPATCH_NEXT: "false" # If u want hook KPatch-Next in build step.
+  # KPM_ENABLE: Kernel Patch Module（SukiSU-Ultra 的内核模块功能）
+  #   - false: 不启用（荣耀 50 SE 用 resukisu，不需要 KPM）
+  #   - true: 启用（仅 SukiSU-Ultra 才能用）
+  KPM_ENABLE: "false"
+  KPM_INLINE: "false"
+  KPM_KPATCH_NEXT: "false"
   KPM_PATCH_SOURCE: "https://raw.githubusercontent.com/SukiSU-Ultra/SukiSU_patch/refs/heads/main/kpm/patch_linux"
 
-  BASEBAND_GUARD_ENABLE: "true" #if u want prevent unauthorized writes to critical partitions/device nodes.
-  BASEBAND_GUARD_BOOT: "false" #if u want to protect boot partition.
+  # ===========================================================================
+  # 13. 基带保护（华为机型建议开启）
+  # ===========================================================================
+  # BASEBAND_GUARD_ENABLE: 防止未授权写入关键分区/设备节点（如 modem 等）
+  #   ⚠️ 与作者模板差异: 作者默认 false，这里改为 true
+  #   原因: 华为机型的基带分区比较敏感，误写可能导致变砖
+  BASEBAND_GUARD_ENABLE: "true"
+  # BASEBAND_GUARD_BOOT: 是否保护 boot 分区（true=禁止写 boot，防止误刷）
+  BASEBAND_GUARD_BOOT: "false"
 
-  GENERATE_DTB: "false" # if u kernel need DTB , but cannot auto generate it. (Only AnyKernel3).
-  GENERATE_CHIP: "mediatek" # only supported for qcom and mediatek.
+  # ===========================================================================
+  # 14. DTB / 芯片配置（🔧 换机型必改）
+  # ===========================================================================
+  # GENERATE_DTB: 内核需要 DTB 但不能自动生成时启用
+  #   - 荣耀 50 SE: false（不需要）
+  GENERATE_DTB: "false"
+  # GENERATE_CHIP: 芯片厂商（用于 AK3 选择正确的打包脚本）
+  #   - "qcom": 高通
+  #   - "mediatek": 联发科（荣耀 50 SE 用这个）
+  GENERATE_CHIP: "mediatek"
 
-  BUILD_DEBUGGER: "true" # Output build errors.
-  SKIP_PATCH: "false" # Ignore errors found in Patch Debugger.
-
-  BUILD_OTHER_CONFIG: "false" # Merge config files.
+  # ===========================================================================
+  # 15. 调试与容错
+  # ===========================================================================
+  # BUILD_DEBUGGER: 是否输出构建错误详情（true=遇到错误时打印详细日志）
+  #   ⚠️ 与作者模板差异: 作者默认 false，这里改为 true（便于排查华为内核的编译问题）
+  BUILD_DEBUGGER: "true"
+  # SKIP_PATCH: 是否忽略 Patch Debugger 发现的错误
+  #   - false: 不忽略（让 Fixed 补丁能正常生效，遇到真正错误会中断）✅ 推荐
+  #   - true: 忽略错误继续编译（可能生成不完整的内核）
+  #   ⚠️ 与作者模板差异: 作者默认 true，这里改为 false
+  #   原因: 我们用 Fixed 补丁修复了所有问题，不需要跳过错误
+  SKIP_PATCH: "false"
+  # BUILD_OTHER_CONFIG: 是否合并其他 config 文件
+  #   - false: 不合并（用 DEFCONFIG_NAME 单个文件）
+  #   - true: 合并 MERGE_CONFIG_FILES 列出的文件
+  BUILD_OTHER_CONFIG: "false"
   MERGE_CONFIG_FILES: ""
 
-  FREE_MORE_SPACE: "false" # if u want get more space, enabled it.
+  # FREE_MORE_SPACE: 释放更多磁盘空间（GitHub Actions 免费额度有限，编译大内核可能不够）
+  #   - false: 不释放（默认）
+  #   - true: 删除不必要的文件释放空间
+  FREE_MORE_SPACE: "false"
 
+# =============================================================================
+# Job 定义
+# =============================================================================
 jobs:
   build-kernel:
+    # Job 显示名（在 Actions 页面显示）
     name: Honor 50 SE (MagicUI 4.2) (Kernel 4.14)
-    runs-on: ubuntu-24.04 # u can changed to ubuntu 22.04, and need container set ubuntu-24.04
+    # 运行环境: ubuntu-24.04（也可改成 ubuntu-22.04）
+    runs-on: ubuntu-24.04
+    # 如果用 ubuntu-22.04 需要加 container: ubuntu-24.04 来获得新工具链
+    # container: ubuntu:focal  # 如需用 Ubuntu 20.04 老环境可取消注释
     env:
+      # CCACHE 配置（编译缓存，加速重复编译）
+      # COMPILERCHECK: 用编译器版本+目标机做缓存键（防止版本混淆）
       CCACHE_COMPILERCHECK: "%compiler% -dumpmachine; %compiler% -dumpversion"
+      # NOHASHDIR: 不把目录路径作为缓存键（不同目录可共享缓存）
       CCACHE_NOHASHDIR: "true"
+      # HARDLINK: 用硬链接代替复制（节省磁盘）
       CCACHE_HARDLINK: "true"
 
     steps:
+      # 步骤 1: 检出工作流仓库（包含所有 action.yml 和本文件）
       - name: ⏰ Checkout repository
         uses: actions/checkout@v6
 
+      # 步骤 2: 准备编译环境（安装依赖、设置环境变量）
       - name: ⌛️ Compilation environment preparation
         uses: ./.github/workflows/build-env
 
+      # 步骤 3: 获取工具链（下载 Clang、GCC、AnyKernel3 等）
       - name: ⚙️ Get necessary tools
         uses: ./.github/workflows/build-ready
 
+      # 步骤 4: 打 SUSFS 补丁（核心隐藏功能）
+      #   - 先打通用 SUSFS 补丁（susfs_patch_to_4.14.patch）
+      #   - 失败的 hunk 会保存为 .rej 文件
+      #   - 然后用 Fixed 补丁修复失败的 hunk
       - name: 🪝 Patch Kernel of SUSFS
         uses: ./.github/workflows/patch-susfs
 
+      # 步骤 5: 打 no-kprobe 补丁（禁用 kprobe，部分华为内核需要）
       - name: 🔗 Patch for no-kprobe
         uses: ./.github/workflows/patch-no-kprobe
 
-      # Honor 官方开源内核有残缺（删除标准头文件、源码等），需在此步骤修复
-      # 换第三方内核时，将下方脚本调用改为：cd $GITHUB_WORKSPACE/device_kernel
+      # 步骤 6: 华为内核专属修复
+      #   ⚠️ 这是荣耀 50 SE 专属步骤，其他机型需要换成自己的脚本或删除
+      #   脚本内容见 setup-honor50se.sh，包含 8 大类修复：
+      #     1. srctree 路径绝对化
+      #     2. connectivity 驱动迁移到 vendor/
+      #     3. SUSFS 兼容性修复（flag→flags、smap_gather_stats 返回值）
+      #     4. 禁用 WERROR
+      #     5. 禁用 stpcpy 内置优化
+      #     6. netfilter 模块禁用 + 头文件补全
+      #     7. conninfra stub 创建
+      #     8. 华为安全检测禁用
+      #   换机型时: 把这里的脚本调用改成你自己的，或删除这一步
       - name: 🪛 Extra Kernel Options
         run: bash .github/workflows/setup-honor50se.sh
 
+      # 步骤 7-10: 其他补丁（按需启用）
+      # Re:Kernel（高通触摸驱动）- 荣耀 50 SE 不需要
       - name: 🧰 Patch Kernel of Re:Kernel
         uses: ./.github/workflows/patch-rekernel
 
+      # Droidspaces（容器支持）- 荣耀 50 SE 不需要
       - name: 💿 Patch Kernel of Droidspaces
         uses: ./.github/workflows/patch-droidspaces
 
+      # 基带保护 - 荣耀 50 SE 已开启 BASEBAND_GUARD_ENABLE=true
       - name: 🔒 Patch Kernel of Baseband Guard
         uses: ./.github/workflows/patch-baseband-guard
 
+      # NoMount（挂载隐藏）- 荣耀 50 SE 已开启 NOMOUNT_ENABLE=true
       - name: 🛡️ Patch Kernel of NoMount
         uses: ./.github/workflows/patch-nomount
 
+      # 步骤 11: 内核编译（make）
       - name: 🚀 Build Process
         uses: ./.github/workflows/build-process
 
+      # 步骤 12: 打包成 AnyKernel3 刷机包
       - name: 🔩 Pack Process
         uses: ./.github/workflows/pack-process
 
+      # 步骤 13: 上传产物（AnyKernel3.zip + rejected_files）
       - name: ✏️ Upload Artifacts
         uses: ./.github/workflows/upload-files
