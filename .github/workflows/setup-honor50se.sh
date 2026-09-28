@@ -63,6 +63,9 @@ with open('fs/proc/task_mmu.c', 'w') as f:
 # 5. 禁用 WERROR
 find . -name "Makefile" -exec sed -i 's/-Werror/-Wno-error/g' {} +
 
+# 5a. 移除被华为删除源码的 netfilter 模块
+sed -i 's/^obj-\$(CONFIG_NETFILTER_XT_TARGET_TCPMSS).*/#obj-\$(CONFIG_NETFILTER_XT_TARGET_TCPMSS) += xt_TCPMSS.o/' net/netfilter/Makefile
+
 # 5a. 创建缺失的标准内核头文件（华为开源版遗漏）
 mkdir -p include/linux/netfilter
 cat > include/linux/netfilter/xt_connmark.h <<'EOF'
