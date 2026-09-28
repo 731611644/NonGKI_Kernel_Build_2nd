@@ -9,7 +9,7 @@
 # 【为什么需要】
 # SUSFS 通用补丁是基于标准 Linux 内核写的，但华为内核有大量魔改：
 #   - 删除了 netfilter 标准头文件（约 60+ 个）
-#   - 删除了 connectivity 驱动的部分头文件（wmt_exp.h 等）
+#   - connectivity Makefile 的路径在 CI 环境解析错误（需加 $(abspath)）
 #   - 改了 stat.c 的参数名（flag → flags）
 #   - smap_gather_stats 函数签名改了（void 而非 int）
 #   - 启用了 -Werror（警告即错误）
@@ -34,15 +34,50 @@ cd $GITHUB_WORKSPACE/device_kernel
 sed -i 's|srctree := \.\.|srctree := $(abspath ..)|' Makefile
 
 # =============================================================================
-# 修复 2: 把 connectivity 驱动移到 vendor/ 目录
+# 修复 2: 按作者 Wiki 方法修改 connectivity Makefile（关键！）
+# =============================================================================
+# 参考: https://github.com/JackA1ltman/NonGKI_Kernel_Build_2nd/wiki/en-Compiling-the-Stock-Vendor-Kernel
+# 问题: connectivity Makefile 里 ABS_PATH_TO_*_DRV = $(srctree)/../$(PATH_TO_*_DRV)，
+#        在 CI 环境 $(srctree) 解析为相对路径，导致符号链接指向错误位置，
+#        编译时报 "bt/Makefile: No such file or directory"。
+# 修复 (作者推荐):
+#   2a. 把 $(srctree)/../$(PATH) 改成 $(abspath $(srctree)/../$(PATH))
+#   2b. 把 ln -s 改成 ln -snf（符号链接已存在时不报错）
+#   2c. 取消注释 BT 驱动段（华为内核把 BT 段注释掉了）
+CONN_MK=drivers/misc/mediatek/connectivity/Makefile
+# 2a. 给所有 ABS_PATH_TO_* 变量加 $(abspath ...)
+sed -i 's|ABS_PATH_TO_\([A-Z_]*\)[[:space:]]*=[[:space:]]*\$(srctree)/\.\./\$(PATH_TO_\1)|ABS_PATH_TO_\1 = $(abspath $(srctree)/../$(PATH_TO_\1))|g' "$CONN_MK"
+# 兜底：匹配可能带多余空格的写法
+sed -i 's|\$(srctree)/\.\./\$(PATH_TO_|$(abspath $(srctree)/../$(PATH_TO_|g' "$CONN_MK"
+# 2b. ln -s → ln -snf
+sed -i 's|ln -s \$(ABS_PATH_TO_|ln -snf $(ABS_PATH_TO_|g' "$CONN_MK"
+# 2c. 取消注释 BT 驱动段（华为内核把 BT 段注释掉了）
+#     用 awk 处理 "For BT built-in mode start" 到 "For BT built-in mode end" 之间的所有行，
+#     去掉行首的 "# "（但保留 @{/@} 标记行），同时把芯片过滤条件改为匹配 CONSYS_6877。
+awk '
+  /For BT built-in mode start/ { in_bt=1; print; next }
+  /For BT built-in mode end/   { in_bt=0; print; next }
+  in_bt && /^# / {
+    line = substr($0, 3)
+    # 把芯片过滤条件改成匹配 CONSYS_6877（或无条件）
+    gsub(/CONSYS_6885/, "CONSYS_6877", line)
+    print line
+    next
+  }
+  { print }
+' "$CONN_MK" > "$CONN_MK.tmp" && mv "$CONN_MK.tmp" "$CONN_MK"
+# 兜底：确保 obj-y += bt/ 存在（可能 BT 段没有 ifneq 包裹）
+grep -q '^obj-y += bt/' "$CONN_MK" || echo 'obj-y += bt/' >> "$CONN_MK"
+echo "[+] connectivity Makefile patched (abspath + ln -snf + BT enabled)"
+
+# =============================================================================
+# 修复 3: 把 connectivity 驱动移到 vendor/ 目录
 # =============================================================================
 # 问题: 华为开源内核把 connectivity 驱动放在 drivers/misc/mediatek/connectivity/，
-#        但实际编译需要的路径是 vendor/mediatek/kernel_modules/connectivity/。
-#        如果不移过去，Makefile 找不到正确的依赖关系。
-# 修复: 把 6 个子驱动（wmt_drv、wmt_chrdev_wifi、wlan_drv_gen4m、bt、fmradio、gps_drv）
-#        移到 vendor/ 目录下对应位置。
-# 原理: 用关联数组 MAP 记录"源名 → 目标路径"映射，循环 mv。
-# 注意: 只移动 conninfra（wmt_drv）会被实际编译，其他 wlan/bt/fm/gps 在修复 5b 中禁用。
+#        但 connectivity Makefile 的 PATH_TO_*_DRV 指向 vendor/mediatek/kernel_modules/connectivity/。
+# 修复: 把 7 个子目录移到 vendor/ 对应位置，并在原位置创建符号链接。
+# 注意: connectivity Makefile 会为 wmt_drv/bt/fmradio/gps_drv/wmt_chrdev_wifi/wlan_drv_gen4m
+#       自己创建符号链接，但不会为 common 创建，因此 common 的符号链接必须由本脚本创建。
 VENDOR="$GITHUB_WORKSPACE/vendor/mediatek/kernel_modules/connectivity"
 declare -A MAP=(
   [wmt_drv]="conninfra"
@@ -51,16 +86,28 @@ declare -A MAP=(
   [bt]="bt/mt66xx/connac2"
   [fmradio]="fmradio"
   [gps_drv]="gps"
+  [common]="common"
 )
 for SRC_NAME in "${!MAP[@]}"; do
+  SRC_PATH="drivers/misc/mediatek/connectivity/$SRC_NAME"
   DST_PATH="$VENDOR/${MAP[$SRC_NAME]}"
   mkdir -p "$(dirname "$DST_PATH")"
-  rm -rf "$DST_PATH"
-  mv "drivers/misc/mediatek/connectivity/$SRC_NAME" "$DST_PATH"
+  if [ -e "$SRC_PATH" ] || [ -L "$SRC_PATH" ]; then
+    rm -rf "$DST_PATH"
+    mv "$SRC_PATH" "$DST_PATH"
+  fi
+  rm -rf "$SRC_PATH"
+  ln -snf "$DST_PATH" "$SRC_PATH"
+  # 验证：目标目录的 Makefile 必须存在
+  if [ -f "$DST_PATH/Makefile" ]; then
+    echo "$SRC_NAME: OK -> $DST_PATH (Makefile exists)"
+  else
+    echo "$SRC_NAME: WARN -> $DST_PATH (NO Makefile at target!)"
+  fi
 done
 
 # =============================================================================
-# 修复 3: 脚本执行权限
+# 修复 4: 脚本执行权限
 # =============================================================================
 # 问题: Git 仓库有时不保留文件执行权限，导致脚本无法运行。
 # 修复: 给所有脚本文件加 +x 权限。
@@ -71,7 +118,7 @@ chmod +x scripts/dtc/dtc_overlay
 find tools/ -type f -name "*.sh" -exec chmod +x {} \;
 
 # =============================================================================
-# 修复 4: SUSFS 补丁兼容性（部分由 Fixed 补丁处理，这里处理剩余的）
+# 修复 5: SUSFS 补丁兼容性（部分由 Fixed 补丁处理，这里处理剩余的）
 # =============================================================================
 # 注意: fdinfo.c 的 inotify 隐藏功能由 susfs_fixed.patch 处理，
 #       这里只处理 stat.c 和 task_mmu.c 的两个小问题。
@@ -123,7 +170,7 @@ with open('fs/proc/task_mmu.c', 'w') as f:
 "
 
 # =============================================================================
-# 修复 5: 禁用 WERROR（华为内核启用了 -Werror，警告即错误）
+# 修复 6: 禁用 WERROR（华为内核启用了 -Werror，警告即错误）
 # =============================================================================
 # 问题: 华为内核在 Makefile 里启用了 -Werror，所有警告都会被当作错误，
 #        编译会因为一些无关紧要的警告（如未使用变量）而失败。
@@ -141,7 +188,7 @@ sed -i 's/^KBUILD_CFLAGS\s*+=/KBUILD_CFLAGS += -fno-builtin-stpcpy /' Makefile
 grep -q "fno-builtin-stpcpy" Makefile || echo 'KBUILD_CFLAGS += -fno-builtin-stpcpy' >> Makefile
 
 # =============================================================================
-# 修复 6: netfilter 模块禁用 + 头文件补全
+# 修复 7: netfilter 模块禁用 + 头文件补全
 # =============================================================================
 # 问题: 华为开源内核删除了 netfilter 下的部分模块源码（如 xt_TCPMSS.c），
 #        但 defconfig 里仍然 CONFIG_NETFILTER_XT_TARGET_TCPMSS=y，
@@ -184,6 +231,7 @@ done
 # 6.3 xt_connmark.h 需要完整定义（uapi 版本只是包装它，不能循环引用）
 # 说明: xt_connmark.h 不能简单 #include <uapi/...>，因为 uapi 版本会反向引用它，
 #       会造成循环引用。所以这里直接给出完整定义。
+if [ ! -f include/linux/netfilter/xt_connmark.h ]; then
 cat > include/linux/netfilter/xt_connmark.h <<'EOF'
 #ifndef _XT_CONNMARK_H
 #define _XT_CONNMARK_H
@@ -203,8 +251,10 @@ struct xt_connmark_mtinfo1 {
 };
 #endif
 EOF
+fi
 
 # 6.4 xt_dscp.h 需要完整定义（uapi/xt_DSCP.h 和 uapi/xt_ecn.h 都引用它）
+if [ ! -f include/linux/netfilter/xt_dscp.h ]; then
 cat > include/linux/netfilter/xt_dscp.h <<'EOF'
 #ifndef _XT_DSCP_H
 #define _XT_DSCP_H
@@ -223,191 +273,56 @@ struct xt_tos_match_info {
 };
 #endif
 EOF
+fi
 
 # =============================================================================
-# 修复 7: 保留 wlan/bt/fm/gps 驱动编译（不移除，源码完整）
+# 修复 8: conninfra 头文件路径自动补全（不创建 stub！）
 # =============================================================================
-# 说明: 华为开源内核包含完整的 wlan/bt/fm/gps 驱动源码
-#   - wlan_drv_gen4m: 162 个 .c 文件（WiFi 驱动）
-#   - bt: 10 个 .c 文件（蓝牙驱动）
-#   - fmradio: 26 个 .c 文件（FM 收音机驱动）
-#   - gps_drv: GPS 驱动
-# 这些驱动通过 Makefile 的符号链接机制从 vendor/ 目录编译，
-# 不需要手动注释掉。如果编译报错，应该修复错误而不是禁用驱动。
-# 注意: 之前版本曾错误地注释掉这些驱动，现已恢复。
-CONN_MK=drivers/misc/mediatek/connectivity/Makefile
-# 不再注释掉 wlan/bt/fm/gps 的编译行，保持华为原始 Makefile 不变
-
-# =============================================================================
-# 修复 8: 创建 wmt_exp.h / stp_exp.h 等缺失头文件
-# =============================================================================
-# 问题: 华为删除了 conninfra 驱动需要的多个头文件:
-#         - wmt_exp.h: WMT (Wireless Management Task) 对外接口
-#         - stp_exp.h: STP (Serial Transport Protocol) 对外接口
-#         - osal_typedef.h: 操作系统抽象层类型定义
-#         - wmt_core.h / wmt_dev.h / wmt_task.h 等: stub（桩文件）
-#       没有这些头文件，conninfra 驱动编译会报错。
-# 修复:
-#   8.1 创建 wmt_exp.h（完整接口定义，因为 conninfra.c 引用了里面的函数）
-#   8.2 创建 stp_exp.h（同上）
-#   8.3 创建 osal_typedef.h（基础类型定义）
-#   8.4 为其他头文件创建空 stub（带 #ifndef 保护，防止重复定义）
-#   8.5 创建 wmt_stp_stub.c 实现（用空函数实现所有接口）
+# 之前的错误做法: 凭空创建了 wmt_exp.h、stp_exp.h、osal_typedef.h 等 12 个 stub 头文件
+#                和 wmt_stp_stub.c，实际上这些文件很可能本来就在 conninfra 源码树里，
+#                只是 Makefile 的 include 路径没覆盖到。构建日志也证实从未报这些头文件缺失。
+# 正确做法:
+#   8.1 扫描 conninfra 目录下所有 */include 子目录，全部加入 ccflags-y
+#   8.2 不创建任何 stub 头文件。如果编译真的报缺头文件，再针对性处理。
+#   8.3 给 wlan/adaptor 也加上 conninfra 的 include 路径
 CONNINFRA_DIR="$VENDOR/conninfra"
-CONNINFRA_INC="$CONNINFRA_DIR/include"
-COMMON_INC=drivers/misc/mediatek/connectivity/common
-mkdir -p "$CONNINFRA_INC" "$COMMON_INC"
+CONNINFRA_MK="$CONNINFRA_DIR/Makefile"
 
-# 8.1 wmt_exp.h: WMT 对外接口（完整定义，conninfra.c 会调用这些函数）
-cat > "$CONNINFRA_INC/wmt_exp.h" <<'EOF'
-#ifndef _WMT_EXP_H_
-#define _WMT_EXP_H_
-#include <linux/types.h>
-typedef int MTK_WCN_BOOL;
-#define MTK_WCN_BOOL_TRUE  1
-#define MTK_WCN_BOOL_FALSE 0
-enum WMTDRV_TYPE {
-	WMTDRV_TYPE_STP = 0, WMTDRV_TYPE_BT, WMTDRV_TYPE_FM, WMTDRV_TYPE_GPS,
-	WMTDRV_TYPE_WIFI, WMTDRV_TYPE_WMT, WMTDRV_TYPE_SDIO1, WMTDRV_TYPE_SDIO2,
-	WMTDRV_TYPE_T, WMTDRV_TYPE_LPBK, WMTDRV_TYPE_GPSL5, WMTDRV_TYPE_MAX
-};
-enum WMTCHIN { WMTCHIN_CHIPID = 0, WMTCHIN_HWVER, WMTCHIN_ADIE, WMTCHIN_FWVER };
-enum WMTDSNS { WMTDSNS_FM_GPS_DISABLE = 0, WMTDSNS_FM_GPS_ENABLE };
-#define FM_TASK_INDX   0
-#define BT_TASK_INDX   1
-#define GPS_TASK_INDX  2
-#define WIFI_TASK_INDX 3
-#define GPSL5_TASK_INDX 4
-struct _MTK_WCN_WLAN_CB_INFO_;
-typedef struct _MTK_WCN_WLAN_CB_INFO_ MTK_WCN_WLAN_CB_INFO, *P_MTK_WCN_WLAN_CB_INFO;
-MTK_WCN_BOOL mtk_wcn_wmt_func_on(enum WMTDRV_TYPE type);
-MTK_WCN_BOOL mtk_wcn_wmt_func_off(enum WMTDRV_TYPE type);
-unsigned int mtk_wcn_wmt_ic_info_get(unsigned int idx);
-int mtk_wcn_wmt_chipid_query(void);
-unsigned int mtk_wcn_wmt_hwver_get(void);
-int mtk_wcn_wmt_msgcb_reg(enum WMTDRV_TYPE type, void *cb);
-int mtk_wcn_wmt_msgcb_unreg(enum WMTDRV_TYPE type);
-int mtk_wcn_wmt_wlan_reg(MTK_WCN_WLAN_CB_INFO *info);
-int mtk_wcn_wmt_wlan_unreg(void);
-void mtk_wcn_wmt_mpu_lock_aquire(void);
-void mtk_wcn_wmt_mpu_lock_release(void);
-int mtk_wcn_wmt_co_clock_flag_get(void);
-int mtk_wcn_wmt_dsns_ctrl(enum WMTDSNS flag);
-void mtk_wcn_wmt_do_reset_only(enum WMTDRV_TYPE type);
-void mtk_wcn_wmt_assert(enum WMTDRV_TYPE type, unsigned int arg);
-void mtk_wcn_wmt_assert_timeout(enum WMTDRV_TYPE type, unsigned int arg);
-void mtk_wcn_wmt_assert_keyword(enum WMTDRV_TYPE type, unsigned int arg);
-int32_t mtk_wcn_wmt_wifi_fem_cfg_report(void *pvInfoBuf);
-#endif
-EOF
-# 同时放到 common 目录（华为原始编译路径会找这里）
-cp "$CONNINFRA_INC/wmt_exp.h" "$COMMON_INC/wmt_exp.h"
+# 8.1 收集 conninfra 下所有 include 目录，追加到 Makefile
+if [ -f "$CONNINFRA_MK" ]; then
+  # 找出所有名为 include 的目录（相对于 conninfra）
+  INCLUDE_DIRS=$(find "$CONNINFRA_DIR" -type d -name include 2>/dev/null | sort)
+  echo "[+] conninfra include dirs found:"
+  echo "$INCLUDE_DIRS"
+  # 把每个 include 目录转成 -I$(TOP)/vendor/.../include 追加到 Makefile
+  for incdir in $INCLUDE_DIRS; do
+    rel_path="${incdir#$GITHUB_WORKSPACE/}"
+    grep -q "$rel_path" "$CONNINFRA_MK" || echo "ccflags-y += -I\$(TOP)/$rel_path" >> "$CONNINFRA_MK"
+  done
+  echo "[+] conninfra Makefile: added all include paths"
+fi
 
-# 8.2 stp_exp.h: STP 对外接口
-cat > "$CONNINFRA_INC/stp_exp.h" <<'EOF'
-#ifndef _STP_EXP_H_
-#define _STP_EXP_H_
-#include <linux/types.h>
-enum { DBG_TIE_LOW = 0, DBG_TIE_HIGH = 1 };
-enum { IDX_GPS_TX = 0, IDX_GPS_RX = 1 };
-int mtk_wcn_stp_send_data(const unsigned char *buf, unsigned int len, unsigned char task_idx);
-int mtk_wcn_stp_receive_data(unsigned char *buf, unsigned int len, unsigned char task_idx);
-int mtk_wcn_stp_register_event_cb(unsigned char task_idx, void *cb);
-int mtk_wcn_stp_enable(unsigned int arg);
-int mtk_wcn_stp_is_ready(void);
-int mtk_wcn_stp_coredump_start_get(void);
-void mtk_wcn_stp_debug_gpio_assert(unsigned int idx, unsigned int level);
-int mtk_wcn_stp_sdio_wake_up_ctrl(unsigned long ctx);
-#endif
-EOF
-cp "$CONNINFRA_INC/stp_exp.h" "$COMMON_INC/stp_exp.h"
-
-# 8.3 osal_typedef.h: 操作系统抽象层类型定义
-cat > "$CONNINFRA_INC/osal_typedef.h" <<'EOF'
-#ifndef _OSAL_TYPEDEF_H_
-#define _OSAL_TYPEDEF_H_
-#include <linux/types.h>
-typedef unsigned char  UCHAR,  *PUCHAR;
-typedef unsigned char  UINT8,  *PUINT8;
-typedef unsigned short UINT16, *PUINT16;
-typedef unsigned int   UINT32, *PUINT32;
-typedef unsigned long long UINT64, *PUINT64;
-typedef signed char    INT8,   *PINT8;
-typedef signed short   INT16,  *PINT16;
-typedef signed int     INT32,  *PINT32;
-typedef unsigned long  ULONG,  *PULONG;
-typedef unsigned int   BOOL;
-#ifndef TRUE
-#define TRUE  1
-#endif
-#ifndef FALSE
-#define FALSE 0
-#endif
-#endif
-EOF
-cp "$CONNINFRA_INC/osal_typedef.h" "$COMMON_INC/osal_typedef.h"
-
-# 8.4 为剩余头文件创建空 stub
-# 说明: 这些头文件被 conninfra 源码 #include 但华为删了实现，
-#        我们用空 stub（只有 #ifndef/#define/#endif）让编译通过，
-#        实际功能由下面的 wmt_stp_stub.c 用空函数实现。
-for hdr in wmt_core.h wmt_dev.h wmt_task.h conninfra_ext.h \
-           mtk_wcn_consys_hw.h mt_clkbuf_ctl.h mtk_6306_gpio.h \
-           emi_symbol_hook.h cos_api.h; do
-  GUARD=$(echo "$hdr" | tr 'a-z.' 'A-Z_')
-  cat > "$CONNINFRA_INC/$hdr" <<EOF
-#ifndef _${GUARD}_
-#define _${GUARD}_
-/* stub - omitted from Honor opensource release */
-#endif
-EOF
-done
-
-# 8.5 wmt_stp_stub.c: 用空函数实现 wmt_exp.h / stp_exp.h 里声明的所有函数
-# 说明: conninfra 驱动会调用这些函数，但实际实现被华为删了。
-#        我们用空实现（返回 0 或 void）让链接通过，运行时 conninfra 调用这些
-#        函数不会真的工作，但不影响内核启动和基本功能。
-cat > "$CONNINFRA_DIR/wmt_stp_stub.c" <<'EOF'
-#include <linux/types.h>
-#include "wmt_exp.h"
-#include "stp_exp.h"
-MTK_WCN_BOOL mtk_wcn_wmt_func_on(enum WMTDRV_TYPE type) { return MTK_WCN_BOOL_TRUE; }
-MTK_WCN_BOOL mtk_wcn_wmt_func_off(enum WMTDRV_TYPE type) { return MTK_WCN_BOOL_TRUE; }
-unsigned int mtk_wcn_wmt_ic_info_get(unsigned int idx) { return 0; }
-int mtk_wcn_wmt_chipid_query(void) { return 0x6877; }
-unsigned int mtk_wcn_wmt_hwver_get(void) { return 0; }
-int mtk_wcn_wmt_msgcb_reg(enum WMTDRV_TYPE type, void *cb) { return 0; }
-int mtk_wcn_wmt_msgcb_unreg(enum WMTDRV_TYPE type) { return 0; }
-int mtk_wcn_wmt_wlan_reg(MTK_WCN_WLAN_CB_INFO *info) { return 0; }
-int mtk_wcn_wmt_wlan_unreg(void) { return 0; }
-void mtk_wcn_wmt_mpu_lock_aquire(void) {}
-void mtk_wcn_wmt_mpu_lock_release(void) {}
-int mtk_wcn_wmt_co_clock_flag_get(void) { return 0; }
-int mtk_wcn_wmt_dsns_ctrl(enum WMTDSNS flag) { return 1; }
-void mtk_wcn_wmt_do_reset_only(enum WMTDRV_TYPE type) {}
-void mtk_wcn_wmt_assert(enum WMTDRV_TYPE type, unsigned int arg) {}
-void mtk_wcn_wmt_assert_timeout(enum WMTDRV_TYPE type, unsigned int arg) {}
-void mtk_wcn_wmt_assert_keyword(enum WMTDRV_TYPE type, unsigned int arg) {}
-int32_t mtk_wcn_wmt_wifi_fem_cfg_report(void *pvInfoBuf) { return 0; }
-int mtk_wcn_stp_send_data(const unsigned char *buf, unsigned int len, unsigned char task_idx) { return len; }
-int mtk_wcn_stp_receive_data(unsigned char *buf, unsigned int len, unsigned char task_idx) { return 0; }
-int mtk_wcn_stp_register_event_cb(unsigned char task_idx, void *cb) { return 0; }
-int mtk_wcn_stp_enable(unsigned int arg) { return 0; }
-int mtk_wcn_stp_is_ready(void) { return 1; }
-int mtk_wcn_stp_coredump_start_get(void) { return 0; }
-void mtk_wcn_stp_debug_gpio_assert(unsigned int idx, unsigned int level) {}
-int mtk_wcn_stp_sdio_wake_up_ctrl(unsigned long ctx) { return 0; }
-EOF
-
-# 把 stub.c 加入 conninfra 的编译列表
-sed -i '/conninfra_core\.o$/a $(MODULE_NAME)-objs += wmt_stp_stub.o' "$CONNINFRA_DIR/Makefile"
-
-# 给 wlan/adaptor 的 Makefile 加 conninfra 的 include 路径
-# 说明: wlan/adaptor 会引用 conninfra 的头文件，需要告诉编译器去哪里找。
+# 8.2 给 wlan/adaptor 的 Makefile 加 conninfra 的 include 路径
 WMT_MK="$VENDOR/wlan/adaptor/Makefile"
 if [ -f "$WMT_MK" ]; then
-  sed -i '/conninfra\/include$/a\ccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/conninfra/drv_init/include\nccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/conninfra/base/include\nccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/conninfra/core/include\nccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/conninfra/conf/include\nccflags-y += -I$(TOP)/vendor/mediatek/kernel_modules/connectivity/conninfra/platform/include' "$WMT_MK"
+  for incdir in $INCLUDE_DIRS; do
+    rel_path="${incdir#$GITHUB_WORKSPACE/}"
+    grep -q "$rel_path" "$WMT_MK" || echo "ccflags-y += -I\$(TOP)/$rel_path" >> "$WMT_MK"
+  done
+  echo "[+] wlan/adaptor Makefile: added conninfra include paths"
 fi
+
+# 8.3 验证：列出 conninfra 下实际存在的关键头文件，确认它们没有丢失
+echo "[+] Verifying conninfra headers exist in source tree:"
+for hdr in wmt_exp.h stp_exp.h osal_typedef.h wmt_core.h wmt_dev.h wmt_task.h \
+           conninfra_ext.h mtk_wcn_consys_hw.h consys_hw.h conninfra_core.h; do
+  found=$(find "$CONNINFRA_DIR" -name "$hdr" 2>/dev/null | head -1)
+  if [ -n "$found" ]; then
+    echo "  FOUND: $hdr -> ${found#$GITHUB_WORKSPACE/}"
+  else
+    echo "  MISSING: $hdr (not found in conninfra tree - will fail at compile time if needed)"
+  fi
+done
 
 # =============================================================================
 # 修复 9: 禁用华为安全检测（防止 root 被检测）
@@ -420,19 +335,35 @@ fi
 #       这是 Kconfig 的标准禁用语法。
 DEFCONFIG=arch/arm64/configs/merge_full_k6877v1_64_defconfig
 
-# 9.1 禁用华为安全/检测相关配置（经核实 defconfig 中确实存在且需禁用的）
-# 说明: 以下配置已在 defconfig 中确认为 =y，禁用后可防止 root 检测。
-#       之前版本包含一些 defconfig 中不存在的配置（如 HISI_PMALLOC 等），
-#       已清理掉这些无效项（sed 找不到匹配行不会有效果，但保持代码整洁）。
+# 9.1 禁用华为安全/检测相关配置（全面覆盖，方便换机型）
+# 说明: 以下是华为/荣耀内核常见的安全检测配置，覆盖多种机型。
+#       本机型 defconfig 中可能只有部分存在，不存在的配置 sed 不会有效果，
+#       但保留全部列表方便以后移植到其他华为机型时直接使用。
+# 原理: sed 把 "CONFIG_XXX=y" 改成 "# CONFIG_XXX is not set"。
+sed -i 's/^CONFIG_HISI_PMALLOC=y.*/# CONFIG_HISI_PMALLOC is not set/' $DEFCONFIG
+sed -i 's/^CONFIG_HIVIEW_SELINUX=y.*/# CONFIG_HIVIEW_SELINUX is not set/' $DEFCONFIG
+sed -i 's/^CONFIG_HISI_SELINUX_EBITMAP_RO=y.*/# CONFIG_HISI_SELINUX_EBITMAP_RO is not set/' $DEFCONFIG
+sed -i 's/^CONFIG_HISI_SELINUX_PROT=y.*/# CONFIG_HISI_SELINUX_PROT is not set/' $DEFCONFIG
+sed -i 's/^CONFIG_HISI_RO_LSM_HOOKS=y.*/# CONFIG_HISI_RO_LSM_HOOKS is not set/' $DEFCONFIG
 sed -i 's/^CONFIG_INTEGRITY=y.*/# CONFIG_INTEGRITY is not set/' $DEFCONFIG
 sed -i 's/^CONFIG_INTEGRITY_AUDIT=y.*/# CONFIG_INTEGRITY_AUDIT is not set/' $DEFCONFIG
+sed -i 's/^CONFIG_HUAWEI_CRYPTO_TEST_MDPP=y.*/# CONFIG_HUAWEI_CRYPTO_TEST_MDPP is not set/' $DEFCONFIG
+sed -i 's/^CONFIG_HUAWEI_SELINUX_DSM=y.*/# CONFIG_HUAWEI_SELINUX_DSM is not set/' $DEFCONFIG
 sed -i 's/^CONFIG_HUAWEI_HIDESYMS=y.*/# CONFIG_HUAWEI_HIDESYMS is not set/' $DEFCONFIG
+sed -i 's/^CONFIG_HW_SLUB_SANITIZE=y.*/# CONFIG_HW_SLUB_SANITIZE is not set/' $DEFCONFIG
 sed -i 's/^CONFIG_HUAWEI_PROC_CHECK_ROOT=y.*/# CONFIG_HUAWEI_PROC_CHECK_ROOT is not set/' $DEFCONFIG
 sed -i 's/^CONFIG_HW_ROOT_SCAN=y.*/# CONFIG_HW_ROOT_SCAN is not set/' $DEFCONFIG
 sed -i 's/^CONFIG_HUAWEI_EIMA=y.*/# CONFIG_HUAWEI_EIMA is not set/' $DEFCONFIG
 sed -i 's/^CONFIG_HUAWEI_EIMA_ACCESS_CONTROL=y.*/# CONFIG_HUAWEI_EIMA_ACCESS_CONTROL is not set/' $DEFCONFIG
+sed -i 's/^CONFIG_HW_DOUBLE_FREE_DYNAMIC_CHECK=y.*/# CONFIG_HW_DOUBLE_FREE_DYNAMIC_CHECK is not set/' $DEFCONFIG
+sed -i 's/^CONFIG_HKIP_ATKINFO=y.*/# CONFIG_HKIP_ATKINFO is not set/' $DEFCONFIG
 sed -i 's/^CONFIG_HW_KERNEL_STP=y.*/# CONFIG_HW_KERNEL_STP is not set/' $DEFCONFIG
+sed -i 's/^CONFIG_HISI_HHEE=y.*/# CONFIG_HISI_HHEE is not set/' $DEFCONFIG
+sed -i 's/^CONFIG_HISI_HHEE_TOKEN=y.*/# CONFIG_HISI_HHEE_TOKEN is not set/' $DEFCONFIG
+sed -i 's/^CONFIG_HISI_DIEID=y.*/# CONFIG_HISI_DIEID is not set/' $DEFCONFIG
+sed -i 's/^CONFIG_HISI_SUBPMU=y.*/# CONFIG_HISI_SUBPMU is not set/' $DEFCONFIG
 sed -i 's/^CONFIG_TEE_ANTIROOT_CLIENT=y.*/# CONFIG_TEE_ANTIROOT_CLIENT is not set/' $DEFCONFIG
+sed -i 's/^CONFIG_HWAA=y.*/# CONFIG_HWAA is not set/' $DEFCONFIG
 
 # =============================================================================
 # 修复 10: 禁用被华为删除源码的内核模块（netfilter xt_TCPMSS）
