@@ -45,10 +45,10 @@ sed -i 's|srctree := \.\.|srctree := $(abspath ..)|' Makefile
 #   2b. 把 ln -s 改成 ln -snf（符号链接已存在时不报错）
 #   2c. 取消注释 BT 驱动段（华为内核把 BT 段注释掉了）
 CONN_MK=drivers/misc/mediatek/connectivity/Makefile
-# 2a. 给所有 ABS_PATH_TO_* 变量加 $(abspath ...)
-sed -i 's|ABS_PATH_TO_\([A-Z_]*\)[[:space:]]*=[[:space:]]*\$(srctree)/\.\./\$(PATH_TO_\1)|ABS_PATH_TO_\1 = $(abspath $(srctree)/../$(PATH_TO_\1))|g' "$CONN_MK"
-# 兜底：匹配可能带多余空格的写法
-sed -i 's|\$(srctree)/\.\./\$(PATH_TO_|$(abspath $(srctree)/../$(PATH_TO_|g' "$CONN_MK"
+# 2a. 给所有 $(srctree)/../$(PATH_TO_XXX) 加 $(abspath ...) 包裹
+#     匹配完整的 $(srctree)/../$(PATH_TO_XXX) 表达式（含右括号），
+#     仅处理不含 abspath 的行（防止重复包裹）。
+sed -i -E '/abspath/! s#(^|[^)])\$\(srctree\)/\.\./\$\(PATH_TO_([A-Z_]+)\)#\1$(abspath $(srctree)/../$(PATH_TO_\2))#g' "$CONN_MK"
 # 2b. ln -s → ln -snf
 sed -i 's|ln -s \$(ABS_PATH_TO_|ln -snf $(ABS_PATH_TO_|g' "$CONN_MK"
 # 2c. 取消注释 BT 驱动段（华为内核把 BT 段注释掉了）
