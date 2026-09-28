@@ -37,18 +37,23 @@ import re
 with open('fs/proc/task_mmu.c') as f:
     lines = f.readlines()
 in_func = False
+found_brace = False
 brace_depth = 0
 out = []
 for line in lines:
     if not in_func and re.search(r'\bsmap_gather_stats\s*\(', line):
         in_func = True
-        brace_depth = line.count('{') - line.count('}')
-    elif in_func:
-        brace_depth += line.count('{') - line.count('}')
-        if 'return 0;' in line:
-            line = line.replace('return 0;', 'return;')
-        if brace_depth <= 0:
-            in_func = False
+    if in_func:
+        if not found_brace and '{' in line:
+            found_brace = True
+            brace_depth = line.count('{') - line.count('}')
+        elif found_brace:
+            brace_depth += line.count('{') - line.count('}')
+            if 'return 0;' in line:
+                line = line.replace('return 0;', 'return;')
+            if brace_depth <= 0:
+                in_func = False
+                found_brace = False
     out.append(line)
 with open('fs/proc/task_mmu.c', 'w') as f:
     f.writelines(out)
