@@ -188,20 +188,16 @@ sed -i 's/^KBUILD_CFLAGS\s*+=/KBUILD_CFLAGS += -fno-builtin-stpcpy /' Makefile
 grep -q "fno-builtin-stpcpy" Makefile || echo 'KBUILD_CFLAGS += -fno-builtin-stpcpy' >> Makefile
 
 # =============================================================================
-# 修复 7: netfilter 模块禁用 + 头文件补全
+# 修复 7: netfilter 头文件补全
 # =============================================================================
-# 问题: 华为开源内核删除了 netfilter 下的部分模块源码（如 xt_TCPMSS.c），
-#        但 defconfig 里仍然 CONFIG_NETFILTER_XT_TARGET_TCPMSS=y，
-#        编译时会找不到源码而报错。同时华为还删除了 include/linux/netfilter/
-#        下的约 60+ 个标准头文件，导致其他模块引用时报错。
+# 问题: 华为开源内核删除了 include/linux/netfilter/ 下的约 60+ 个标准头文件，
+#        导致其他模块引用时报错。
+# 说明: xt_TCPMSS.c 之前被华为遗漏，已从标准 Linux 4.14 补回内核源码仓库，
+#       这里不再需要禁用，保持默认配置即可。
 # 修复:
-#   6.1 在 Makefile 注释掉 xt_TCPMSS 的编译行
-#   6.2 为缺失的头文件创建"包装头文件"（include <uapi/...>）
+#   7.1 为缺失的头文件创建"包装头文件"（include <uapi/...>）
 
-# 6.1 禁用 xt_TCPMSS 模块（源码被华为删除）
-sed -i 's/^obj-\$(CONFIG_NETFILTER_XT_TARGET_TCPMSS).*/#obj-\$(CONFIG_NETFILTER_XT_TARGET_TCPMSS) += xt_TCPMSS.o/' net/netfilter/Makefile
-
-# 6.2 创建缺失的 netfilter 包装头文件
+# 7.1 创建缺失的 netfilter 包装头文件
 # 说明: include/linux/netfilter/ 下的头文件应该是"包装器"，内容是 #include <uapi/...>。
 #       华为把这些都删了，我们用脚本批量重建。
 # 原理: 对每个缺失的头文件，去 include/uapi/linux/netfilter/ 找对应的（忽略大小写），
@@ -592,10 +588,10 @@ sed -i 's/^CONFIG_TEE_ANTIROOT_CLIENT=y.*/# CONFIG_TEE_ANTIROOT_CLIENT is not se
 sed -i 's/^CONFIG_HWAA=y.*/# CONFIG_HWAA is not set/' $DEFCONFIG
 
 # =============================================================================
-# 修复 10: 禁用被华为删除源码的内核模块（netfilter xt_TCPMSS）
+# 修复 10: xt_TCPMSS 已补回，不再需要禁用
 # =============================================================================
-# 问题: 同修复 6.1，defconfig 里也启用了 CONFIG_NETFILTER_XT_TARGET_TCPMSS，
-#        需要在 defconfig 层面也禁用（光在 Makefile 注释不够）。
-sed -i 's/^CONFIG_NETFILTER_XT_TARGET_TCPMSS=y.*/# CONFIG_NETFILTER_XT_TARGET_TCPMSS is not set/' $DEFCONFIG
+# 说明: xt_TCPMSS.c 已从标准 Linux 4.14 补回内核源码仓库，
+#       defconfig 中 CONFIG_NETFILTER_XT_TARGET_TCPMSS=y 保持启用，
+#       确保 VPN 等场景的 TCP MSS 钳位功能可用。
 
 echo "[+] All setup done."
