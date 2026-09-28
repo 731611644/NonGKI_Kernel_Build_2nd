@@ -324,14 +324,14 @@ jobs:
 
       # 步骤 6: 华为内核专属修复
       #   ⚠️ 这是荣耀 50 SE 专属步骤，其他机型需要换成自己的脚本或删除
-      #   脚本内容见 setup-honor50se.sh，包含 8 大类修复：
+      #   脚本内容见 setup-honor50se.sh，包含以下修复：
       #     1. srctree 路径绝对化
-      #     2. connectivity 驱动迁移到 vendor/
-      #     3. SUSFS 兼容性修复（flag→flags、smap_gather_stats 返回值）
-      #     4. 禁用 WERROR
-      #     5. 禁用 stpcpy 内置优化
-      #     6. netfilter 模块禁用 + 头文件补全
-      #     7. conninfra stub 创建
+      #     2. 按作者 Wiki 修改 connectivity Makefile（abspath + ln -snf + 启用 BT）
+      #     3. connectivity 驱动迁移到 vendor/（含 common 目录）
+      #     4. SUSFS 兼容性修复（flag→flags、smap_gather_stats 返回值）
+      #     5. 禁用 WERROR / stpcpy 优化
+      #     6. netfilter 头文件补全
+      #     7. conninfra include 路径自动补全（不创建 stub）
       #     8. 华为安全检测禁用
       #   换机型时: 把这里的脚本调用改成你自己的，或删除这一步
       - name: 🪛 Extra Kernel Options
