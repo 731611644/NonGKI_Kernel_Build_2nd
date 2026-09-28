@@ -420,31 +420,19 @@ fi
 #       这是 Kconfig 的标准禁用语法。
 DEFCONFIG=arch/arm64/configs/merge_full_k6877v1_64_defconfig
 
-# 9.1 禁用华为安全/检测相关配置（约 20 项）
-sed -i 's/^CONFIG_HISI_PMALLOC=y.*/# CONFIG_HISI_PMALLOC is not set/' $DEFCONFIG
-sed -i 's/^CONFIG_HIVIEW_SELINUX=y.*/# CONFIG_HIVIEW_SELINUX is not set/' $DEFCONFIG
-sed -i 's/^CONFIG_HISI_SELINUX_EBITMAP_RO=y.*/# CONFIG_HISI_SELINUX_EBITMAP_RO is not set/' $DEFCONFIG
-sed -i 's/^CONFIG_HISI_SELINUX_PROT=y.*/# CONFIG_HISI_SELINUX_PROT is not set/' $DEFCONFIG
-sed -i 's/^CONFIG_HISI_RO_LSM_HOOKS=y.*/# CONFIG_HISI_RO_LSM_HOOKS is not set/' $DEFCONFIG
+# 9.1 禁用华为安全/检测相关配置（经核实 defconfig 中确实存在且需禁用的）
+# 说明: 以下配置已在 defconfig 中确认为 =y，禁用后可防止 root 检测。
+#       之前版本包含一些 defconfig 中不存在的配置（如 HISI_PMALLOC 等），
+#       已清理掉这些无效项（sed 找不到匹配行不会有效果，但保持代码整洁）。
 sed -i 's/^CONFIG_INTEGRITY=y.*/# CONFIG_INTEGRITY is not set/' $DEFCONFIG
 sed -i 's/^CONFIG_INTEGRITY_AUDIT=y.*/# CONFIG_INTEGRITY_AUDIT is not set/' $DEFCONFIG
-sed -i 's/^CONFIG_HUAWEI_CRYPTO_TEST_MDPP=y.*/# CONFIG_HUAWEI_CRYPTO_TEST_MDPP is not set/' $DEFCONFIG
-sed -i 's/^CONFIG_HUAWEI_SELINUX_DSM=y.*/# CONFIG_HUAWEI_SELINUX_DSM is not set/' $DEFCONFIG
 sed -i 's/^CONFIG_HUAWEI_HIDESYMS=y.*/# CONFIG_HUAWEI_HIDESYMS is not set/' $DEFCONFIG
-sed -i 's/^CONFIG_HW_SLUB_SANITIZE=y.*/# CONFIG_HW_SLUB_SANITIZE is not set/' $DEFCONFIG
 sed -i 's/^CONFIG_HUAWEI_PROC_CHECK_ROOT=y.*/# CONFIG_HUAWEI_PROC_CHECK_ROOT is not set/' $DEFCONFIG
 sed -i 's/^CONFIG_HW_ROOT_SCAN=y.*/# CONFIG_HW_ROOT_SCAN is not set/' $DEFCONFIG
 sed -i 's/^CONFIG_HUAWEI_EIMA=y.*/# CONFIG_HUAWEI_EIMA is not set/' $DEFCONFIG
 sed -i 's/^CONFIG_HUAWEI_EIMA_ACCESS_CONTROL=y.*/# CONFIG_HUAWEI_EIMA_ACCESS_CONTROL is not set/' $DEFCONFIG
-sed -i 's/^CONFIG_HW_DOUBLE_FREE_DYNAMIC_CHECK=y.*/# CONFIG_HW_DOUBLE_FREE_DYNAMIC_CHECK is not set/' $DEFCONFIG
-sed -i 's/^CONFIG_HKIP_ATKINFO=y.*/# CONFIG_HKIP_ATKINFO is not set/' $DEFCONFIG
 sed -i 's/^CONFIG_HW_KERNEL_STP=y.*/# CONFIG_HW_KERNEL_STP is not set/' $DEFCONFIG
-sed -i 's/^CONFIG_HISI_HHEE=y.*/# CONFIG_HISI_HHEE is not set/' $DEFCONFIG
-sed -i 's/^CONFIG_HISI_HHEE_TOKEN=y.*/# CONFIG_HISI_HHEE_TOKEN is not set/' $DEFCONFIG
-sed -i 's/^CONFIG_HISI_DIEID=y.*/# CONFIG_HISI_DIEID is not set/' $DEFCONFIG
-sed -i 's/^CONFIG_HISI_SUBPMU=y.*/# CONFIG_HISI_SUBPMU is not set/' $DEFCONFIG
 sed -i 's/^CONFIG_TEE_ANTIROOT_CLIENT=y.*/# CONFIG_TEE_ANTIROOT_CLIENT is not set/' $DEFCONFIG
-sed -i 's/^CONFIG_HWAA=y.*/# CONFIG_HWAA is not set/' $DEFCONFIG
 
 # =============================================================================
 # 修复 10: 禁用被华为删除源码的内核模块（netfilter xt_TCPMSS）
