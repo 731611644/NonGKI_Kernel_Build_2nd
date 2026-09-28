@@ -62,6 +62,28 @@ with open('fs/proc/task_mmu.c', 'w') as f:
 # 5. 禁用 WERROR
 find . -name "Makefile" -exec sed -i 's/-Werror/-Wno-error/g' {} +
 
+# 5a. 创建缺失的标准内核头文件（华为开源版遗漏）
+mkdir -p include/linux/netfilter
+cat > include/linux/netfilter/xt_connmark.h <<'EOF'
+#ifndef _XT_CONNMARK_H
+#define _XT_CONNMARK_H
+#include <linux/types.h>
+enum {
+	XT_CONNMARK_SET = 0,
+	XT_CONNMARK_SAVE,
+	XT_CONNMARK_RESTORE
+};
+struct xt_connmark_tginfo1 {
+	__u32 ctmark, ctmask, nfmask;
+	__u8 mode;
+};
+struct xt_connmark_mtinfo1 {
+	__u32 mark, mask;
+	__u8 invert;
+};
+#endif
+EOF
+
 # 5b. 只编译 conninfra，跳过 wlan/bt/fm/gps
 CONN_MK=drivers/misc/mediatek/connectivity/Makefile
 sed -i 's|^        obj-y += wmt_chrdev_wifi/|        #obj-y += wmt_chrdev_wifi/|' "$CONN_MK"
