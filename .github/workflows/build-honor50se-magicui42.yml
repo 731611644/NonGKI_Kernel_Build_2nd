@@ -148,7 +148,7 @@ env:
   AK3_SOURCE : "https://github.com/osm0sis/AnyKernel3.git"
   AK3_BRANCH : "master"
   # BOOT_SOURCE: 原厂 boot.img 路径（留空表示用 AK3 自带的 flash 模式，不合并内核到 boot）
-  BOOT_SOURCE : ""
+  BOOT_SOURCE : "https://github.com/731611644/-boot-/releases/download/1.0/boot.img"
   # NEED_DTBO: 是否需要生成/打包 DTBO（设备树覆盖）
   #   - 荣耀 50 SE: false（不需要）
   #   - 高通机型: 通常 true
