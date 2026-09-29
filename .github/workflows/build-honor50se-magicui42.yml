@@ -172,7 +172,7 @@ env:
   # PACK_METHOD: 打包方式
   #   - AnyKernel3: 用 AnyKernel3 制作刷机 zip（需要 AK3_SOURCE/AK3_BRANCH）
   #   - MKBOOTIMG: 用 mkbootimg 直接生成 boot.img（不需要 AK3）
-  PACK_METHOD: "AnyKernel3"
+  PACK_METHOD: "MKBOOTIMG"
   # PACK_KMODULES: 是否打包内核模块 (.ko) 到 AnyKernel3
   #   - false: 不打包（大多数情况）
   #   - true: 打包（如果你需要加载额外内核模块）
